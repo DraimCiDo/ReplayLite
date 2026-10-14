@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate release version
+        run: |
+          $version = [IO.File]::ReadAllText('VERSION').Trim()
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw 'Tag must match VERSION'
+          }
+      - name: Download pinned dependencies
+        run: ./source/setup-deps.ps1
+      - name: Compile EXE and icons
+        run: ./source/build.ps1
+      - name: Check EXE version and UI
+        run: ./source/check-build.ps1
+      - name: Package portable application
+        run: ./source/package.ps1
+      - name: Upload build files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ReplayLite-Windows
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          archive: true
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ReplayLite-Windows
+          path: dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/ReplayLite.exe dist/ReplayLite-Windows.zip dist/SHA256SUMS.txt \
+            --verify-tag --draft --title "ReplayLite $GITHUB_REF_NAME" \
+            --notes-file dist/RELEASE-NOTES.md
+          gh release edit "$GITHUB_REF_NAME" --draft=false

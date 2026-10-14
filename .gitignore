@@ -10,6 +10,8 @@
 *.log
 *.png
 !/assets/*.png
+!/assets/docs/*.png
+/dist/
 *.pdb
 .vs/
 Thumbs.db
