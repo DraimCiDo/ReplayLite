@@ -45,7 +45,7 @@ namespace ReplayLite
             LabelAt(this, "Сохрани момент, который уже случился", 85, 56, 425, 24, 9, false, Theme.Muted);
             badge.SetBounds(580, 30, 156, 34); Controls.Add(badge);
             StyleButton(update, "Обновления", this, 580, 69, 156, 25, false);
-            update.Click += delegate { if (!updating) using (var dialog = new UpdateForm(ApplyUpdate)) dialog.ShowDialog(this); };
+            update.Click += async delegate { if (updating) return; using (var dialog = new UpdateForm(ApplyUpdate)) dialog.ShowDialog(this); if (updating) await Quit(); };
 
             var recording = Card(24, 98, 712, 163);
             state.SetBounds(20, 16, 415, 33); state.Font = new Font("Segoe UI", 16, FontStyle.Bold); state.ForeColor = Theme.Text; state.BackColor = Theme.Card; state.AutoEllipsis = true; recording.Controls.Add(state);
@@ -246,9 +246,9 @@ namespace ReplayLite
                 string helper = Path.Combine(helperFolder, "UpdateHelper.exe"); File.Copy(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "UpdateHelper.exe"), helper);
                 if (recorder != null) await StopRecorder(); settings.Save();
                 Process.Start(new ProcessStartInfo(helper, Process.GetCurrentProcess().Id + " " + Recorder.Quote(AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\')) + " " + Recorder.Quote(stage)) { UseShellExecute = false, CreateNoWindow = true });
-                busy = false; await Quit();
             }
-            finally { busy = false; updating = false; if (!released) SyncActions(); }
+            catch { updating = false; throw; }
+            finally { busy = false; if (!released) SyncActions(); }
         }
         async Task RefreshDisplayAsync()
         {
