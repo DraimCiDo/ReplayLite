@@ -108,7 +108,7 @@ cd ReplayLite
 
 ## Сборки и Releases
 
-[GitHub Actions](https://github.com/DraimCiDo/ReplayLite/actions/workflows/build-release.yml) собирает EXE и проверяет интерфейс на Windows. Для push в `main` и pull request публикуется артефакт сборки. Push тега вида **`v0.2.1`**, совпадающего с файлом `VERSION`, дополнительно создаёт GitHub Release с **EXE**, **готовым ZIP** и **SHA256SUMS.txt**.
+[GitHub Actions](https://github.com/DraimCiDo/ReplayLite/actions/workflows/build-release.yml) собирает EXE и проверяет интерфейс на Windows. Для push в `main` и pull request публикуется артефакт сборки. Push тега вида **`v0.2.2`**, совпадающего с файлом `VERSION`, дополнительно создаёт GitHub Release с **EXE**, **готовым ZIP** и **SHA256SUMS.txt**.
 
 В CI нет NVIDIA для проверки захвата: реальные проверки записи выполнены локально и описаны выше. [Как выпустить версию](docs/RELEASING.md) · [История изменений](CHANGELOG.md).
 

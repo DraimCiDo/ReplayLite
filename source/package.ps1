@@ -16,13 +16,24 @@ foreach ($name in @('source','assets','licenses','docs','bin')) { Copy-Item -Lit
 $sourceRoot = Join-Path $stage 'third-party-source'
 New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
 $archives = @(
-    @{Name='FFmpeg-946fcce07b.zip'; Uri='https://codeload.github.com/FFmpeg/FFmpeg/zip/946fcce07b'; Hash='11E6ADB3AE54F116867A292B3402E36B80BE8810C32CA47CD2942A6BE840DFCD'},
-    @{Name='NAudio-1.10.0.zip'; Uri='https://codeload.github.com/naudio/NAudio/zip/refs/tags/v1.10.0'; Hash='E88BD0272957DE1CCE651771F0FEDCC7A00FA3CD27D72A3923B5E4F3EB009769'}
+    @{Name='FFmpeg-946fcce07b.zip'; Commit='946fcce07b6dcd0331c8cc609192aeff5e1924f8'; Repo='FFmpeg/FFmpeg'; Prefix='FFmpeg'; License='COPYING.GPLv3'; Marker='GNU GENERAL PUBLIC LICENSE'},
+    @{Name='NAudio-1.10.0.zip'; Commit='f3c2a15379731239363fd0c26d6b5fe8162a5087'; Repo='naudio/NAudio'; Prefix='NAudio'; License='license.txt'; Marker='Microsoft Public License'}
 )
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($archive in $archives) {
-    $cached = Join-Path $appRoot ('.deps-cache\' + $archive.Name)
-    if (-not (Test-Path -LiteralPath $cached)) { Invoke-WebRequest -Uri $archive.Uri -OutFile $cached -UseBasicParsing }
-    if ((Get-FileHash -LiteralPath $cached -Algorithm SHA256).Hash -ne $archive.Hash) { throw ('Source archive SHA256 mismatch: ' + $archive.Name) }
+    # GitHub guarantees contents for a commit, not the byte layout of generated ZIPs.
+    # These source archives are redistributed as data, never executed or used to build dependencies.
+    $cached = Join-Path $appRoot ('.deps-cache\source-' + $archive.Commit + '.zip')
+    $uri = 'https://codeload.github.com/' + $archive.Repo + '/zip/' + $archive.Commit
+    if (-not (Test-Path -LiteralPath $cached)) { Invoke-WebRequest -Uri $uri -OutFile $cached -UseBasicParsing }
+    $sourceZip = [IO.Compression.ZipFile]::OpenRead($cached)
+    try {
+        $prefix = $archive.Prefix + '-' + $archive.Commit + '/'
+        $license = $sourceZip.GetEntry($prefix + $archive.License)
+        if (-not $license -or @($sourceZip.Entries | Where-Object { -not $_.FullName.StartsWith($prefix, [StringComparison]::Ordinal) }).Count -ne 0) { throw ('Unexpected source archive structure: ' + $archive.Name) }
+        $reader = [IO.StreamReader]::new($license.Open())
+        try { if ($reader.ReadToEnd() -notmatch [regex]::Escape($archive.Marker)) { throw ('Source license mismatch: ' + $archive.Name) } } finally { $reader.Dispose() }
+    } finally { $sourceZip.Dispose() }
     Copy-Item -LiteralPath $cached -Destination (Join-Path $sourceRoot $archive.Name)
 }
 $zipPath = Join-Path $outputRoot 'ReplayLite-Windows.zip'
