@@ -10,6 +10,10 @@ on:
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  SIGNING_ENABLED: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
 
 concurrency:
   group: build-${{ github.ref }}
@@ -18,7 +22,7 @@ concurrency:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
@@ -40,8 +44,73 @@ jobs:
         run: ./source/check-build.ps1
       - name: Check replay buffer reset without GPU
         run: ./source/check-buffer.ps1
+      - name: Validate configured signing
+        if: env.SIGNING_ENABLED == 'true'
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_PROJECT: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_APP: ${{ vars.SIGNPATH_APP_CONFIGURATION }}
+          SIGNPATH_SETUP: ${{ vars.SIGNPATH_SETUP_CONFIGURATION }}
+        run: |
+          foreach ($name in @('SIGNPATH_API_TOKEN','SIGNPATH_PROJECT','SIGNPATH_POLICY','SIGNPATH_APP','SIGNPATH_SETUP')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing signing configuration: $name" }
+          }
+      - name: Upload application for signing
+        if: env.SIGNING_ENABLED == 'true'
+        id: app-signing-input
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ReplayLite-application-signing
+          path: |
+            ReplayLite.exe
+            UpdateHelper.exe
+            Uninstall.exe
+          archive: true
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign application and helpers
+        if: env.SIGNING_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@ced31329c0317e779dad2eec2a7c3bb46ea1343e # v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_APP_CONFIGURATION }}
+          github-artifact-id: ${{ steps.app-signing-input.outputs.artifact-id }}
+          output-artifact-directory: .signed/application
+      - name: Verify signed application
+        if: env.SIGNING_ENABLED == 'true'
+        run: ./source/import-signed-files.ps1 -InputDirectory .signed/application -TargetDirectory . -Names @('ReplayLite.exe','UpdateHelper.exe','Uninstall.exe')
       - name: Package portable application and setup
         run: ./source/package.ps1
+      - name: Upload setup for signing
+        if: env.SIGNING_ENABLED == 'true'
+        id: setup-signing-input
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ReplayLite-setup-signing
+          path: dist/ReplayLite-Setup.exe
+          archive: true
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign installer
+        if: env.SIGNING_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@ced31329c0317e779dad2eec2a7c3bb46ea1343e # v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_SETUP_CONFIGURATION }}
+          github-artifact-id: ${{ steps.setup-signing-input.outputs.artifact-id }}
+          output-artifact-directory: .signed/setup
+      - name: Verify signed setup and recalculate checksums
+        if: env.SIGNING_ENABLED == 'true'
+        run: |
+          ./source/import-signed-files.ps1 -InputDirectory .signed/setup -TargetDirectory dist -Names @('ReplayLite-Setup.exe')
+          ./source/package-checksums.ps1
       - name: Check installation and update rollback
         run: ./source/check-deployment.ps1
       - name: Upload build files

@@ -20,3 +20,7 @@ Desktop.ini
 /UpdateHelper.exe
 /Uninstall.exe
 /ReplayLite-Setup.exe
+
+/.signed/
+*.pfx
+*.p12

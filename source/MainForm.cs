@@ -72,9 +72,10 @@ namespace ReplayLite
             AddInput(options, sound, 20, 153, 205, "Источники звука"); AddInput(options, display, 245, 153, 445, "Монитор для записи");
             LabelAt(options, "Сочетание для сохранения", 20, 203, 335, 22, 9, false, Theme.Muted);
             hotkey.Binding = settings.Hotkey; AddInput(options, hotkey, 20, 227, 335, "Горячая клавиша сохранения");
-            hotkeyInfo.SetBounds(375, 229, 315, 43); hotkeyInfo.BackColor = Theme.Card; hotkeyInfo.ForeColor = Theme.Muted; hotkeyInfo.Font = new Font("Segoe UI", 8); hotkeyInfo.Text = "Нажми поле и введи Ctrl/Alt/Shift + клавишу. Escape отменяет изменение."; options.Controls.Add(hotkeyInfo);
-            hotkey.CaptureStarted += delegate { if (hotkeyRegistered) Native.UnregisterHotKey(Handle, 1); hotkeyRegistered = false; hotkeyInfo.Text = "Нажми сочетание с Ctrl, Alt или Shift. F12 зарезервирована Windows."; };
+            hotkeyInfo.SetBounds(375, 229, 315, 43); hotkeyInfo.BackColor = Theme.Card; hotkeyInfo.ForeColor = Theme.Muted; hotkeyInfo.Font = new Font("Segoe UI", 8); hotkeyInfo.Text = "Одиночная клавиша или Ctrl/Alt/Shift/Win + клавиша. Нажми и отпусти. Щелчок вне поля — отмена."; options.Controls.Add(hotkeyInfo);
+            hotkey.CaptureStarted += delegate { if (hotkeyRegistered) Native.UnregisterHotKey(Handle, 1); hotkeyRegistered = false; hotkeyInfo.Text = "Нажми клавишу или сочетание и отпусти все клавиши. Для отмены щёлкни вне поля."; };
             hotkey.CaptureCancelled += delegate { if (!released) RegisterConfiguredHotkey(); };
+            hotkey.CaptureFailed += delegate { hotkeyInfo.ForeColor = Theme.Red; hotkeyInfo.Text = "Не удалось включить ввод клавиш. Повтори попытку; прежняя настройка сохранена."; };
             hotkey.BindingProposed += delegate(object sender, BindingEventArgs e) { e.Accepted = TryChangeHotkey(e.Binding); };
             tips.SetToolTip(display, "Подключённые мониторы: модель, разрешение и основной экран. Для записи требуется подключение к NVIDIA.");
 
@@ -96,6 +97,7 @@ namespace ReplayLite
             SetState("Буфер выключен");
             timer.Tick += async delegate { await RefreshState(); }; timer.Start();
             VisibleChanged += delegate { if (!Visible) { hotkey.CancelCapture(); StopAnimations(); } };
+            Deactivate += delegate { hotkey.CancelCapture(); };
             Resize += delegate { if (WindowState == FormWindowState.Minimized) { hotkey.CancelCapture(); StopAnimations(); } };
             FormClosing += async delegate(object sender, FormClosingEventArgs e) { if (quitting) return; e.Cancel = true; if (e.CloseReason == CloseReason.WindowsShutDown) { await Quit(); return; } Hide(); };
             Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
@@ -159,12 +161,12 @@ namespace ReplayLite
             hotkeyRegistered = Native.RegisterHotKey(Handle, 1, 0x4000 | settings.Hotkey.Modifiers, (uint)settings.Hotkey.Key);
             hotkey.Binding = settings.Hotkey; hotkey.Error = !hotkeyRegistered; hotkey.Invalidate();
             hotkeyInfo.ForeColor = hotkeyRegistered ? Theme.Muted : Theme.Red;
-            hotkeyInfo.Text = hotkeyRegistered ? "Нажми поле для изменения. Escape отменяет ввод. Сочетание сохраняется автоматически." : "Сочетание занято. Выбери другое; кнопка сохранения работает.";
+            hotkeyInfo.Text = hotkeyRegistered ? "Нажми поле для изменения. Одиночная клавиша перехватывается при работе приложения." : "Сочетание занято. Выбери другое; кнопка сохранения работает.";
             UpdateHotkeyLabels();
         }
         bool TryChangeHotkey(KeyBinding binding)
         {
-            if (!binding.Valid) return false;
+            if (!binding.Valid) { hotkey.Error = true; hotkey.Invalidate(); hotkeyInfo.ForeColor = Theme.Red; hotkeyInfo.Text = "Выбери обычную клавишу или сочетание. F12 зарезервирована Windows; Ctrl/Alt/Shift/Win отдельно не назначаются."; return false; }
             var previous = settings.Hotkey;
             if (hotkeyRegistered) Native.UnregisterHotKey(Handle, 1);
             hotkeyRegistered = false;
@@ -318,8 +320,10 @@ namespace ReplayLite
             report.AppendLine("SAVING_TRAY_STATE: PASS");
             SetState("Ошибка сохранения", TrayState.Error); await WaitForAnimationsAsync();
             if (trayState != TrayState.Error) throw new Exception("Error tray state failed.");
-            start.PreviewHover(false); progress.Value = .9f; Hide();
+            start.PreviewHover(false); progress.Value = .9f; hotkey.BeginCapture(); Hide();
             if (ActiveAnimations != 0) throw new Exception("Hidden animations still running.");
+            if (hotkey.IsCapturing || hotkey.CaptureHookActive) throw new Exception("Hidden window kept keyboard capture active.");
+            report.AppendLine("HIDDEN_CAPTURE_HOOK_REMOVED: PASS");
             report.AppendLine("HIDDEN_ANIMATION_TIMERS_ZERO: PASS");
             var process = Process.GetCurrentProcess(); var cpuStart = process.TotalProcessorTime.TotalSeconds; var idle = Stopwatch.StartNew(); await Task.Delay(2000); process.Refresh();
             report.AppendLine("HIDDEN_IDLE_CPU_SECONDS: " + (process.TotalProcessorTime.TotalSeconds - cpuStart).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture));
@@ -335,7 +339,8 @@ namespace ReplayLite
             try
             {
                 hotkey.BeginCapture();
-                if (hotkey.Propose(new KeyBinding(0, Keys.F10))) throw new Exception("Unmodified hotkey accepted.");
+                if (!hotkey.CaptureHookActive) throw new Exception("Editing hook was not installed.");
+                if (hotkey.Propose(new KeyBinding(0, Keys.F12))) throw new Exception("Reserved F12 accepted.");
                 reserved = Native.RegisterHotKey(Handle, 91, 0x4000 | 6, (uint)Keys.F11);
                 if (hotkey.Propose(new KeyBinding(6, Keys.F11))) throw new Exception("Occupied hotkey accepted.");
                 if (settings.Hotkey.Key != original.Key || settings.Hotkey.Modifiers != original.Modifiers) throw new Exception("Failed binding overwrote settings.");
@@ -346,6 +351,22 @@ namespace ReplayLite
                 if (!hotkey.Propose(new KeyBinding(6, Keys.F10))) throw new Exception("Test hotkey could not be registered.");
                 var stored = Settings.Load();
                 if (stored.Hotkey.Key != Keys.F10 || stored.Hotkey.Modifiers != 6 || save.Detail != stored.Hotkey.ToString() || !traySave.Text.Contains(stored.Hotkey.ToString())) throw new Exception("Binding did not persist or update labels.");
+                foreach (var binding in new[] { new KeyBinding(0, Keys.F10), new KeyBinding(1, Keys.F10), new KeyBinding(4, Keys.F10), new KeyBinding(8, Keys.F10), new KeyBinding(2, Keys.Insert), new KeyBinding(0, Keys.NumPad8), new KeyBinding(0, Keys.Tab), new KeyBinding(0, Keys.Escape) })
+                {
+                    if (!binding.Valid) throw new Exception("Supported binding rejected: " + binding);
+                    hotkey.BeginCapture(); var previous = settings.Hotkey; bool accepted = hotkey.Propose(binding);
+                    if (accepted) { var loaded = Settings.Load(); if (loaded.Hotkey.Modifiers != binding.Modifiers || loaded.Hotkey.Key != binding.Key || save.Detail != binding.ToString() || hotkey.CaptureHookActive) throw new Exception("Expanded binding did not persist: " + binding); }
+                    else { if (settings.Hotkey.Key != previous.Key || settings.Hotkey.Modifiers != previous.Modifiers) throw new Exception("Occupied expanded binding lost the previous setting."); hotkey.CancelCapture(); }
+                }
+                if (new KeyBinding(16, Keys.A).Valid || new KeyBinding(0, Keys.LButton).Valid || new KeyBinding(0, Keys.ControlKey).Valid) throw new Exception("Invalid primary key accepted.");
+                var captureState = new KeyCaptureState(); KeyBinding? complete;
+                captureState.Feed((int)Keys.RWin, true, out complete); captureState.Feed((int)Keys.LShiftKey, true, out complete); captureState.Feed((int)Keys.Tab, true, out complete);
+                captureState.Feed((int)Keys.Tab, true, out complete); if (complete.HasValue) throw new Exception("Key repeat committed capture.");
+                captureState.Feed((int)Keys.LShiftKey, false, out complete); captureState.Feed((int)Keys.Tab, false, out complete); if (complete.HasValue) throw new Exception("Capture committed before modifiers were released.");
+                captureState.Feed((int)Keys.RWin, false, out complete); if (!complete.HasValue || complete.Value.Modifiers != 12 || complete.Value.Key != Keys.Tab) throw new Exception("Win/Shift capture lost the original modifiers.");
+                captureState = new KeyCaptureState(); captureState.Seed((int)Keys.LControlKey); captureState.Feed((int)Keys.Return, true, out complete); captureState.Feed((int)Keys.Return, false, out complete);
+                if (captureState.Feed((int)Keys.LControlKey, false, out complete) || !complete.HasValue || complete.Value.Modifiers != 2) throw new Exception("Previously held modifier release was swallowed.");
+                hotkey.BeginCapture(); hotkey.CancelCapture(); if (hotkey.CaptureHookActive) throw new Exception("Cancelled capture left a hook running.");
             }
             finally
             {
