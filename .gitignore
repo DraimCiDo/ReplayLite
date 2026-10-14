@@ -1,0 +1,15 @@
+/ReplayLite.exe
+/NAudio.dll
+/bin/*.exe
+/third-party-source/*.zip
+/.deps-cache/
+/test/
+*.mp4
+*.ts
+*.partial
+*.log
+*.png
+*.pdb
+.vs/
+Thumbs.db
+Desktop.ini
