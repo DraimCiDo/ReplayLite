@@ -342,152 +342,6 @@ namespace ReplayLite
         public void Dispose() { if (process != null) process.Dispose(); }
     }
 
-    public sealed class MainForm : Form
-    {
-        readonly Settings settings = Settings.Load();
-        Recorder recorder;
-        readonly ComboBox duration = new ComboBox(), fps = new ComboBox(), sound = new ComboBox();
-        readonly NumericUpDown rate = new NumericUpDown(), display = new NumericUpDown();
-        readonly TextBox folder = new TextBox();
-        readonly Button start = new Button(), save = new Button(), browse = new Button();
-        readonly Label state = new Label(), metrics = new Label(), hint = new Label();
-        readonly NotifyIcon tray = new NotifyIcon();
-        readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 1000 };
-        bool busy, saving, closing, quitting;
-        double lastCpu, lastTime;
-        readonly Stopwatch clock = Stopwatch.StartNew();
-        public MainForm()
-        {
-            duration.DropDownStyle = fps.DropDownStyle = sound.DropDownStyle = ComboBoxStyle.DropDownList;
-            Text = "ReplayLite"; ClientSize = new Size(650, 530); MinimumSize = new Size(666, 569); MaximumSize = MinimumSize;
-            StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(20, 24, 33); ForeColor = Color.FromArgb(228, 234, 242); Font = new Font("Segoe UI", 10);
-            Icon = SystemIcons.Application; AutoScaleMode = AutoScaleMode.Dpi;
-            AddLabel("ReplayLite", 28, 20, 24, FontStyle.Bold, 500, 48);
-            AddLabel("ПОСЛЕДНИЕ МИНУТЫ · ОДНА ГОРЯЧАЯ КЛАВИША", 30, 73, 9, FontStyle.Regular, 570, 26).ForeColor = Color.FromArgb(132, 148, 167);
-            AddLabel("Длительность", 30, 120, 10, FontStyle.Regular, 180, 24);
-            AddLabel("Кадры / секунду", 245, 120, 10, FontStyle.Regular, 170, 24);
-            AddLabel("Битрейт, Мбит/с", 448, 120, 10, FontStyle.Regular, 170, 24);
-            duration.Items.AddRange(new object[] { "30 секунд", "2 минуты", "5 минут", "10 минут" }); duration.SelectedIndex = settings.Seconds == 30 ? 0 : settings.Seconds == 300 ? 2 : settings.Seconds == 600 ? 3 : 1;
-            fps.Items.AddRange(new object[] { "30 — меньше нагрузка", "60 — плавнее" }); fps.SelectedIndex = settings.Fps == 60 ? 1 : 0;
-            rate.Minimum = 2; rate.Maximum = 30; rate.Value = settings.Mbps;
-            AddInput(duration, 30, 150, 190); AddInput(fps, 245, 150, 180); AddInput(rate, 448, 150, 170);
-            AddLabel("Звук", 30, 198, 10, FontStyle.Regular, 400, 24);
-            sound.Items.AddRange(new object[] { "Компьютер + микрофон", "Только компьютер", "Без звука" }); sound.SelectedIndex = settings.Audio == "none" ? 2 : settings.Audio == "system" ? 1 : 0; AddInput(sound, 30, 228, 395);
-            AddLabel("Экран (индекс DXGI)", 448, 198, 10, FontStyle.Regular, 170, 24);
-            display.Minimum = 0; display.Maximum = 7; display.Value = settings.Display; AddInput(display, 448, 228, 170);
-            AddLabel("Папка для повторов", 30, 276, 10, FontStyle.Regular, 500, 24);
-            folder.Text = settings.Folder; AddInput(folder, 30, 306, 520); StyleButton(browse, "…", 560, 305, 58, false);
-            browse.Click += delegate { using (var d = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Папка для сохранённых MP4" }) if (d.ShowDialog() == DialogResult.OK) folder.Text = d.SelectedPath; };
-            StyleButton(start, "Включить буфер", 30, 363, 282, true); StyleButton(save, "Сохранить · Ctrl+Shift+F9", 326, 363, 292, false); save.Enabled = false;
-            state.SetBounds(30, 422, 590, 28); state.Text = "Буфер выключен"; Controls.Add(state);
-            metrics.SetBounds(30, 452, 590, 25); metrics.Font = new Font("Segoe UI", 9); metrics.ForeColor = Color.FromArgb(132, 148, 167); metrics.Text = "GPU-захват · NVENC · буфер на диске · без предпросмотра"; Controls.Add(metrics);
-            hint.SetBounds(30, 485, 590, 30); hint.Font = new Font("Segoe UI", 8); hint.Text = "Записывается весь выбранный экран в исходном разрешении. Закрытие → трей."; hint.ForeColor = metrics.ForeColor; Controls.Add(hint);
-            start.Click += async delegate { await Toggle(); }; save.Click += async delegate { await SaveReplay(); };
-            tray.Icon = Icon; tray.Text = "ReplayLite — буфер выключен"; tray.Visible = true;
-            var menu = new ContextMenuStrip(); menu.Items.Add("Открыть", null, delegate { Restore(); }); menu.Items.Add("Сохранить повтор", null, async delegate { await SaveReplay(); }); menu.Items.Add("Включить / остановить", null, async delegate { await Toggle(); }); menu.Items.Add("Папка повторов", null, delegate { OpenFolder(); }); menu.Items.Add("Выход", null, async delegate { await Quit(); }); tray.ContextMenuStrip = menu;
-            tray.DoubleClick += delegate { Restore(); };
-            timer.Tick += async delegate { await RefreshState(); }; timer.Start();
-            FormClosing += async delegate(object sender, FormClosingEventArgs e)
-            {
-                if (quitting) return;
-                e.Cancel = true;
-                if (e.CloseReason == CloseReason.WindowsShutDown) { await Quit(); return; }
-                Hide(); tray.ShowBalloonTip(2000, "ReplayLite", "Приложение в трее. Для выхода выбери «Выход».", ToolTipIcon.Info);
-            };
-            Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
-        }
-        void PowerChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
-        {
-            if (e.Mode == Microsoft.Win32.PowerModes.Resume && !IsDisposed) BeginInvoke(new Action(async delegate { if (recorder != null && !busy && !closing) { busy = true; try { await StopRecorder(); SetState("После сна буфер остановлен. Включи его снова."); } finally { busy = false; } } }));
-        }
-        Label AddLabel(string text, int x, int y, float size, FontStyle style, int w, int h)
-        { var label = new Label { Text = text, Font = new Font("Segoe UI", size, style) }; label.SetBounds(x, y, w, h); Controls.Add(label); return label; }
-        void AddInput(Control control, int x, int y, int width)
-        {
-            control.SetBounds(x, y, width, 33); control.BackColor = Color.FromArgb(32, 39, 52); control.ForeColor = ForeColor;
-            var combo = control as ComboBox;
-            if (combo != null)
-            {
-                combo.DropDownStyle = ComboBoxStyle.DropDownList;
-                // Native Windows themed drop-downs paint a light background; use readable dark text.
-                combo.BackColor = Color.White; combo.ForeColor = Color.FromArgb(20, 24, 33);
-            }
-            Controls.Add(control);
-        }
-        void StyleButton(Button b, string text, int x, int y, int width, bool accent)
-        { b.Text = text; b.SetBounds(x, y, width, 44); b.FlatStyle = FlatStyle.Flat; b.FlatAppearance.BorderSize = 0; b.BackColor = accent ? Color.FromArgb(79, 211, 165) : Color.FromArgb(43, 55, 73); b.ForeColor = accent ? Color.FromArgb(12, 31, 26) : ForeColor; Controls.Add(b); }
-        void SetState(string text) { state.Text = text; tray.Text = ("ReplayLite — " + text).Substring(0, Math.Min(63, ("ReplayLite — " + text).Length)); }
-        void Restore() { Show(); WindowState = FormWindowState.Normal; Activate(); }
-        internal void VerifyControls()
-        {
-            if (duration.SelectedIndex < 0 || fps.SelectedIndex < 0 || sound.SelectedIndex < 0)
-                throw new InvalidOperationException("A default drop-down value was lost.");
-        }
-        void OpenFolder() { Directory.CreateDirectory(settings.Folder); Process.Start("explorer.exe", Recorder.Quote(settings.Folder)); }
-        void Inputs(bool enabled) { foreach (var c in new Control[] { duration, fps, sound, rate, display, folder, browse }) c.Enabled = enabled; }
-        async Task Toggle()
-        {
-            if (busy || closing) return;
-            busy = true; start.Enabled = false; save.Enabled = false;
-            Exception startupError = null;
-            try
-            {
-                if (recorder != null) { await StopRecorder(); SetState("Буфер выключен"); }
-                else
-                {
-                    if (!Path.IsPathRooted(folder.Text)) throw new ArgumentException("Укажи абсолютный путь папки повторов.");
-                    settings.Seconds = new[] { 30, 120, 300, 600 }[duration.SelectedIndex]; settings.Fps = fps.SelectedIndex == 1 ? 60 : 30; settings.Mbps = (int)rate.Value; settings.Display = (int)display.Value;
-                    settings.Audio = new[] { "both", "system", "none" }[sound.SelectedIndex]; settings.Folder = folder.Text; settings.Save(); Inputs(false); SetState("Запускаю захват…");
-                    recorder = new Recorder(settings); await recorder.StartAsync(); lastCpu = Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds + recorder.CpuSeconds; lastTime = clock.Elapsed.TotalSeconds; SetState("Запись буфера включена"); start.Text = "Остановить буфер"; save.Enabled = true;
-                }
-            }
-            catch (Exception e) { startupError = e; }
-            if (startupError != null) { if (recorder != null) await StopRecorder(); SetState("Не удалось включить буфер"); ShowError(startupError.Message); }
-            busy = false; start.Enabled = true;
-        }
-        async Task StopRecorder()
-        {
-            var r = recorder; if (r == null) return; save.Enabled = false;
-            await r.StopAsync(); r.Dispose(); recorder = null; Inputs(true); start.Text = "Включить буфер";
-            metrics.Text = "GPU-захват · NVENC · буфер на диске · без предпросмотра";
-        }
-        async Task SaveReplay()
-        {
-            if (recorder == null || busy || saving || closing) return;
-            saving = true; save.Enabled = false; SetState("Сохраняю повтор…");
-            try { var output = await recorder.SaveAsync(); SetState("Сохранено: " + Path.GetFileName(output)); tray.ShowBalloonTip(3000, "Повтор сохранён", output, ToolTipIcon.Info); }
-            catch (Exception e) { ShowError(e.Message); SetState(recorder == null ? "Буфер выключен" : "Ошибка сохранения — буфер работает"); }
-            finally { saving = false; save.Enabled = recorder != null && recorder.Running && !busy; }
-        }
-        async Task RefreshState()
-        {
-            if (recorder == null || busy || closing) return;
-            if (recorder.Failure != null || !recorder.Running)
-            { busy = true; string message = recorder.Failure ?? ("Запись остановлена.\n" + recorder.ErrorLog); await StopRecorder(); SetState("Захват остановлен"); ShowError(message); busy = false; return; }
-            try
-            {
-                var p = Process.GetCurrentProcess(); p.Refresh(); double total = p.TotalProcessorTime.TotalSeconds + recorder.CpuSeconds, now = clock.Elapsed.TotalSeconds;
-                double cpu = Math.Max(0, (total - lastCpu) / Math.Max(0.01, now - lastTime) / Environment.ProcessorCount * 100); lastCpu = total; lastTime = now;
-                metrics.Text = string.Format("Буфер {0:0}/{1} с   ·   CPU {2:0.0}%   ·   RAM {3:0} МБ   ·   диск {4:0} МБ", recorder.BufferedSeconds, settings.Seconds, cpu, (p.WorkingSet64 + recorder.Memory) / 1048576.0, recorder.DiskBytes / 1048576.0);
-            }
-            catch (Exception e) { SetState("Ошибка состояния: " + e.Message); }
-        }
-        void ShowError(string message) { Restore(); MessageBox.Show(this, message, "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-        async Task Quit()
-        {
-            if (closing) return; closing = true; timer.Stop(); start.Enabled = save.Enabled = false;
-            while (busy) await Task.Delay(100);
-            if (recorder != null) await StopRecorder();
-            tray.Visible = false; tray.Dispose(); Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged; Native.UnregisterHotKey(Handle, 1); quitting = true; Close();
-        }
-        protected override void OnShown(EventArgs e)
-        { base.OnShown(e); if (!Native.RegisterHotKey(Handle, 1, 0x4000 | 0x0002 | 0x0004, (uint)Keys.F9)) hint.Text = "Ctrl+Shift+F9 занята другим приложением. Используй кнопку сохранения."; }
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == 0x0312 && m.WParam.ToInt32() == 1) { var pending = SaveReplay(); return; }
-            base.WndProc(ref m);
-        }
-    }
     static class Native
     {
         [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
@@ -535,14 +389,23 @@ namespace ReplayLite
             Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
+            if (args.Length == 2 && (args[0] == "--ui-test" || args[0] == "--ui-live-test"))
+            {
+                using (var form = new MainForm())
+                {
+                    int exitCode = 1;
+                    form.Shown += async delegate { try { if (args[0] == "--ui-live-test") await form.VerifyLiveUiAsync(args[1]); else await form.VerifyUiAsync(args[1]); exitCode = 0; } catch (Exception error) { File.WriteAllText(args[0] == "--ui-live-test" ? Path.Combine(args[1], "ui-live-test.txt") : args[1], error.ToString()); } finally { Application.ExitThread(); } };
+                    Application.Run(form); return exitCode;
+                }
+            }
             if (args.Length == 2 && args[0] == "--screenshot")
             {
                 using (var form = new MainForm())
                 {
                     form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
-                    using (var image = new Bitmap(form.Width, form.Height))
+                    using (var image = new Bitmap(form.ClientSize.Width, form.ClientSize.Height))
                     using (var graphics = Graphics.FromImage(image))
-                    { graphics.CopyFromScreen(form.Location, Point.Empty, form.Size); image.Save(args[1]); }
+                    { graphics.CopyFromScreen(form.PointToScreen(Point.Empty), Point.Empty, form.ClientSize); image.Save(args[1]); }
                 }
                 return 0;
             }

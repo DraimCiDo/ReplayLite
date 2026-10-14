@@ -9,6 +9,7 @@
 *.partial
 *.log
 *.png
+!/assets/*.png
 *.pdb
 .vs/
 Thumbs.db
