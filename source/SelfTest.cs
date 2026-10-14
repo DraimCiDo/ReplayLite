@@ -25,6 +25,10 @@ namespace ReplayLite
             Directory.CreateDirectory(root);
             var report = new StringBuilder(); int result = 1;
             var settings = new Settings { Seconds = args.Length > 3 ? int.Parse(args[3], CultureInfo.InvariantCulture) : 10, Fps = 30, Mbps = 8, Audio = args.Length > 2 ? args[2] : "both", Folder = root };
+            if (args.Length > 4) settings.Display = int.Parse(args[4], CultureInfo.InvariantCulture);
+            if (args.Length > 5) settings.DisplayAdapter = int.Parse(args[5], CultureInfo.InvariantCulture);
+            var monitor = MonitorCatalog.Enumerate().Find(m => m.Adapter == settings.DisplayAdapter && m.Output == settings.Display);
+            if (monitor != null) settings.Rotation = monitor.Rotation;
             using (var recorder = new Recorder(settings))
             {
                 try

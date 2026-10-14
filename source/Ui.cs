@@ -94,6 +94,7 @@ namespace ReplayLite
     sealed class SelectBox : Control
     {
         public readonly List<object> Items = new List<object>();
+        ContextMenuStrip popup;
         int index = -1;
         public int SelectedIndex
         {
@@ -102,13 +103,21 @@ namespace ReplayLite
         }
         public SelectBox()
         { Theme.Canvas(this); BackColor = Theme.Card; Cursor = Cursors.Hand; TabStop = true; AccessibleRole = AccessibleRole.ComboBox; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
-        void Open()
+        internal void Open()
         {
-            if (!Enabled) return;
-            var menu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), BackColor = Theme.Input, ForeColor = Theme.Text, Font = Font, ShowImageMargin = false, MinimumSize = new Size(Width, 0) };
-            for (int i = 0; i < Items.Count; i++) { int choice = i; var item = menu.Items.Add(Items[i].ToString()); item.Click += delegate { SelectedIndex = choice; }; }
-            menu.Closed += delegate { menu.Dispose(); }; menu.Show(this, new Point(0, Height));
+            if (!Enabled || Items.Count == 0) return;
+            if (popup == null) popup = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), BackColor = Theme.Input, ForeColor = Theme.Text, Font = Font, ShowImageMargin = false };
+            if (popup.Visible) return;
+            popup.Items.Clear(); popup.MinimumSize = new Size(Width, 0);
+            for (int i = 0; i < Items.Count; i++) { int choice = i; var item = popup.Items.Add(Items[i].ToString()); item.Click += delegate { SelectedIndex = choice; }; }
+            // Closed is raised while ToolStrip still uses its native window. Dispose only with the owner.
+            popup.Show(this, new Point(0, Height));
         }
+        internal void PickForTest(int choice) { if (popup == null || !popup.Visible) throw new InvalidOperationException("Popup not open"); popup.Items[choice].PerformClick(); popup.Close(); }
+        internal void ClosePopup() { if (popup != null) popup.Close(); }
+        protected override void OnVisibleChanged(EventArgs e) { if (!Visible && popup != null) popup.Close(); base.OnVisibleChanged(e); }
+        protected override void OnEnabledChanged(EventArgs e) { if (!Enabled && popup != null) popup.Close(); Invalidate(); base.OnEnabledChanged(e); }
+        protected override void Dispose(bool disposing) { if (disposing && popup != null) { popup.Dispose(); popup = null; } base.Dispose(disposing); }
         protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left) Open(); base.OnMouseDown(e); }
         protected override bool IsInputKey(Keys key) { return key == Keys.Up || key == Keys.Down || base.IsInputKey(key); }
         protected override void OnKeyDown(KeyEventArgs e)
@@ -120,7 +129,6 @@ namespace ReplayLite
         }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -186,7 +194,7 @@ namespace ReplayLite
                 g.SmoothingMode = SmoothingMode.AntiAlias; g.ScaleTransform(size / 64f, size / 64f);
                 using (var path = Theme.Round(new RectangleF(2, 2, 60, 60), 16)) using (var brush = new SolidBrush(Color.FromArgb(23, 34, 46))) g.FillPath(brush, path);
                 Color ring = state == TrayState.Idle ? Color.FromArgb(153, 172, 193) : state == TrayState.Error ? Theme.Red : state == TrayState.Saving ? Theme.Blue : Theme.Accent;
-                using (var pen = new Pen(ring, 6) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(pen, 14, 14, 36, 36, 35, 285);
+                using (var pen = new Pen(ring, 6) { StartCap = LineCap.Round, EndCap = LineCap.Flat }) g.DrawArc(pen, 14, 14, 36, 36, 35, 285);
                 using (var brush = new SolidBrush(ring)) { g.FillPolygon(brush, new[] { new PointF(43, 8), new PointF(56, 20), new PointF(40, 24) }); g.FillEllipse(brush, 25, 25, 14, 14); }
                 if (state != TrayState.Idle) { using (var brush = new SolidBrush(Theme.Background)) g.FillEllipse(brush, 43, 43, 20, 20); using (var brush = new SolidBrush(ring)) g.FillEllipse(brush, 47, 47, 12, 12); }
             }

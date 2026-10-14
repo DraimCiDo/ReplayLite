@@ -20,12 +20,17 @@ namespace ReplayLite
     public sealed class Settings
     {
         public int Seconds = 120, Fps = 30, Mbps = 8, Display = 0;
+        public int DisplayAdapter, Rotation;
+        public string MonitorId = "";
+        public KeyBinding Hotkey = KeyBinding.Default;
         public string Audio = "both";
         public string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "ReplayLite");
-        public static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReplayLite");
+        public static readonly bool Portable = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "portable.flag"));
+        public static readonly string Home = Portable ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReplayLite");
         public static Settings Load()
         {
             var s = new Settings();
+            if (Portable) s.Folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Replays");
             try
             {
                 foreach (var line in File.ReadAllLines(Path.Combine(Home, "settings.txt"), Encoding.UTF8))
@@ -37,19 +42,29 @@ namespace ReplayLite
                         case "Seconds": if (int.TryParse(p[1], out v)) s.Seconds = Math.Max(10, Math.Min(600, v)); break;
                         case "Fps": if (int.TryParse(p[1], out v)) s.Fps = v == 60 ? 60 : 30; break;
                         case "Mbps": if (int.TryParse(p[1], out v)) s.Mbps = Math.Max(2, Math.Min(30, v)); break;
-                        case "Display": if (int.TryParse(p[1], out v)) s.Display = Math.Max(0, Math.Min(7, v)); break;
+                        case "Display": if (int.TryParse(p[1], out v)) s.Display = Math.Max(0, Math.Min(63, v)); break;
+                        case "DisplayAdapter": if (int.TryParse(p[1], out v)) s.DisplayAdapter = Math.Max(0, Math.Min(31, v)); break;
+                        case "MonitorId": s.MonitorId = p[1]; break;
+                        case "HotkeyModifiers": if (int.TryParse(p[1], out v)) s.Hotkey.Modifiers = (uint)v; break;
+                        case "HotkeyKey": if (int.TryParse(p[1], out v)) s.Hotkey.Key = (Keys)v; break;
                         case "Audio": if (new[] { "both", "system", "none" }.Contains(p[1])) s.Audio = p[1]; break;
-                        case "Folder": if (Path.IsPathRooted(p[1])) s.Folder = p[1]; break;
+                        case "Folder": if (Path.IsPathRooted(p[1])) s.Folder = p[1]; else if (Portable) s.Folder = Deployment.Child(AppDomain.CurrentDomain.BaseDirectory, p[1]); break;
                     }
                 }
             }
             catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            if (!s.Hotkey.Valid) s.Hotkey = KeyBinding.Default;
             return s;
         }
         public void Save()
         {
             Directory.CreateDirectory(Home);
-            File.WriteAllLines(Path.Combine(Home, "settings.txt"), new[] { "Seconds=" + Seconds, "Fps=" + Fps, "Mbps=" + Mbps, "Display=" + Display, "Audio=" + Audio, "Folder=" + Folder }, Encoding.UTF8);
+            string target = Path.Combine(Home, "settings.txt"), pending = target + ".new";
+            string storedFolder = Folder, appPrefix = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\') + "\\";
+            if (Portable && Path.GetFullPath(Folder).StartsWith(appPrefix, StringComparison.OrdinalIgnoreCase)) storedFolder = Path.GetFullPath(Folder).Substring(appPrefix.Length);
+            File.WriteAllLines(pending, new[] { "Seconds=" + Seconds, "Fps=" + Fps, "Mbps=" + Mbps, "Display=" + Display, "DisplayAdapter=" + DisplayAdapter, "MonitorId=" + MonitorId, "HotkeyModifiers=" + Hotkey.Modifiers, "HotkeyKey=" + (int)Hotkey.Key, "Audio=" + Audio, "Folder=" + storedFolder }, Encoding.UTF8);
+            if (File.Exists(target)) File.Replace(pending, target, null); else File.Move(pending, target);
         }
     }
 
@@ -193,11 +208,13 @@ namespace ReplayLite
                 if (Config.Audio != "none") audio.Add(OpenAudio(true));
                 if (Config.Audio == "both") audio.Add(OpenAudio(false));
                 foreach (var a in audio) a.Start();
-                var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-thread_queue_size", "8", "-f", "lavfi", "-i", "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=1" };
+                var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture" };
                 foreach (var a in audio) args.AddRange(new[] { "-thread_queue_size", "32", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", a.InputPath });
-                args.AddRange(new[] { "-map", "0:v", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-fps_mode", "cfr" });
-                if (audio.Count == 2) args.AddRange(new[] { "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:latency=1[a]", "-map", "[a]" });
-                else if (audio.Count == 1) args.AddRange(new[] { "-map", "1:a" });
+                string graph = "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=1[v]";
+                if (audio.Count == 2) graph += ";[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:latency=1[a]";
+                args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-fps_mode", "cfr" });
+                if (audio.Count == 2) args.AddRange(new[] { "-map", "[a]" });
+                else if (audio.Count == 1) args.AddRange(new[] { "-map", "0:a" });
                 if (audio.Count > 0) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k", "-threads:a", "1" });
                 args.AddRange(new[] { "-f", "segment", "-segment_format", "mpegts", "-segment_time", "2", "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d.ts" });
                 process = Launch(ffmpeg, args, session, Log);
@@ -308,7 +325,7 @@ namespace ReplayLite
                 output = Path.Combine(Config.Folder, "Replay-" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff") + ".mp4");
                 partial = output + ".partial.mp4";
                 var log = new StringBuilder();
-                using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", partial }, snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
+                using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-display_rotation:v:0", Config.Rotation.ToString(CultureInfo.InvariantCulture), "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", partial }, snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
                 {
                     await Task.Run(delegate { if (!remux.WaitForExit(60000)) { remux.Kill(); remux.WaitForExit(); throw new TimeoutException("Сохранение заняло больше минуты."); } remux.WaitForExit(); });
                     if (remux.ExitCode != 0) throw new IOException("Не удалось сохранить повтор.\n" + log);
@@ -402,10 +419,9 @@ namespace ReplayLite
             {
                 using (var form = new MainForm())
                 {
-                    form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
-                    using (var image = new Bitmap(form.ClientSize.Width, form.ClientSize.Height))
-                    using (var graphics = Graphics.FromImage(image))
-                    { graphics.CopyFromScreen(form.PointToScreen(Point.Empty), Point.Empty, form.ClientSize); image.Save(args[1]); }
+                    form.PreviewForDocs(); form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
+                    using (var image = new Bitmap(form.Width, form.Height))
+                    { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(args[1]); }
                 }
                 return 0;
             }

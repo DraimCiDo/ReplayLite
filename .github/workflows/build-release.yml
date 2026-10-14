@@ -38,8 +38,10 @@ jobs:
         run: ./source/build.ps1
       - name: Check EXE version and UI
         run: ./source/check-build.ps1
-      - name: Package portable application
+      - name: Package portable application and setup
         run: ./source/package.ps1
+      - name: Check installation and update rollback
+        run: ./source/check-deployment.ps1
       - name: Upload build files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -68,7 +70,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            dist/ReplayLite.exe dist/ReplayLite-Windows.zip dist/SHA256SUMS.txt \
+            dist/ReplayLite.exe dist/ReplayLite-Portable.zip dist/ReplayLite-Setup.exe dist/SHA256SUMS.txt \
             --verify-tag --draft --title "ReplayLite $GITHUB_REF_NAME" \
             --notes-file dist/RELEASE-NOTES.md
           gh release edit "$GITHUB_REF_NAME" --draft=false
