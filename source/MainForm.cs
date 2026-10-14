@@ -202,24 +202,39 @@ namespace ReplayLite
         { if (message.Msg == 0x0312 && message.WParam.ToInt32() == 1) { var pending = SaveReplay(); return; } base.WndProc(ref message); }
         internal void VerifyControls()
         { if (duration.SelectedIndex < 0 || fps.SelectedIndex < 0 || sound.SelectedIndex < 0) throw new InvalidOperationException("A default selection was lost."); }
+        async Task WaitForAnimationsAsync()
+        {
+            var timeout = Stopwatch.StartNew(); long settledSince = -1;
+            while (timeout.ElapsedMilliseconds < 3000)
+            {
+                if (ActiveAnimations == 0)
+                {
+                    if (settledSince < 0) settledSince = timeout.ElapsedMilliseconds;
+                    if (timeout.ElapsedMilliseconds - settledSince >= 100) return;
+                }
+                else settledSince = -1;
+                await Task.Delay(25);
+            }
+            throw new TimeoutException("UI animations did not settle within 3 seconds.");
+        }
         internal async Task VerifyUiAsync(string target)
         {
             testing = true; VerifyControls(); var report = new System.Text.StringBuilder();
             start.PreviewHover(true); progress.Value = .65f; SetState("Буфер включён", TrayState.Recording);
-            await Task.Delay(350);
+            await WaitForAnimationsAsync();
             if (ActiveAnimations != 0 || trayState != TrayState.Recording) throw new Exception("Animation did not settle or recording tray state was lost.");
             report.AppendLine("TRANSITIONS_SETTLE: PASS");
-            SetState("Сохраняю повтор…", TrayState.Saving); await Task.Delay(250);
+            SetState("Сохраняю повтор…", TrayState.Saving); await WaitForAnimationsAsync();
             if (trayState != TrayState.Saving || ActiveAnimations != 0) throw new Exception("Save status failed.");
             report.AppendLine("SAVING_TRAY_STATE: PASS");
-            SetState("Ошибка сохранения", TrayState.Error); await Task.Delay(250);
+            SetState("Ошибка сохранения", TrayState.Error); await WaitForAnimationsAsync();
             if (trayState != TrayState.Error) throw new Exception("Error tray state failed.");
             start.PreviewHover(false); progress.Value = .9f; Hide();
             if (ActiveAnimations != 0) throw new Exception("Hidden animations still running.");
             report.AppendLine("HIDDEN_ANIMATION_TIMERS_ZERO: PASS");
             var process = Process.GetCurrentProcess(); var cpuStart = process.TotalProcessorTime.TotalSeconds; var idle = Stopwatch.StartNew(); await Task.Delay(2000); process.Refresh();
             report.AppendLine("HIDDEN_IDLE_CPU_SECONDS: " + (process.TotalProcessorTime.TotalSeconds - cpuStart).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture));
-            Restore(); start.PreviewHover(false); progress.Value = 0; SetState("Буфер выключен"); await Task.Delay(250);
+            Restore(); start.PreviewHover(false); progress.Value = 0; SetState("Буфер выключен"); await WaitForAnimationsAsync();
             if (trayState != TrayState.Idle || ActiveAnimations != 0) throw new Exception("Idle state failed.");
             report.AppendLine("IDLE_TRAY_STATE: PASS");
             File.WriteAllText(target, report.ToString(), new System.Text.UTF8Encoding(false));
