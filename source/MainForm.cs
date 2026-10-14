@@ -205,7 +205,7 @@ namespace ReplayLite
         {
             if (recorder == null || busy || saving || closing) return;
             saving = true; SetState("Сохраняю повтор…", TrayState.Saving);
-            try { var output = await recorder.SaveAsync(); lastReplay = output; openLast.Enabled = true; SetState("Сохранено: " + Path.GetFileName(output)); if (!testing) tray.ShowBalloonTip(3000, "Повтор сохранён", output, ToolTipIcon.Info); }
+            try { var output = await recorder.SaveAsync(); lastReplay = output; openLast.Enabled = true; RefreshBufferMetrics(); progress.FinishAnimation(); SetState("Сохранено: " + Path.GetFileName(output)); if (!testing) tray.ShowBalloonTip(3000, "Повтор сохранён", output, ToolTipIcon.Info); }
             catch (Exception e) { ShowError(e.Message); SetState("Ошибка сохранения", TrayState.Error); }
             finally { saving = false; SyncActions(); }
         }
@@ -220,11 +220,16 @@ namespace ReplayLite
             {
                 var process = Process.GetCurrentProcess(); process.Refresh(); double total = process.TotalProcessorTime.TotalSeconds + recorder.CpuSeconds, now = clock.Elapsed.TotalSeconds;
                 double cpu = Math.Max(0, (total - lastCpu) / Math.Max(.01, now - lastTime) / Environment.ProcessorCount * 100); lastCpu = total; lastTime = now;
-                double seconds = recorder.BufferedSeconds;
                 cpuValue.Text = cpu.ToString("0.0") + "%"; ramValue.Text = ((process.WorkingSet64 + recorder.Memory) / 1048576.0).ToString("0") + " МБ";
-                bufferValue.Text = string.Format("{0:0} / {1} с", seconds, settings.Seconds); diskValue.Text = (recorder.DiskBytes / 1048576.0).ToString("0") + " МБ"; progress.Value = (float)(seconds / settings.Seconds);
+                RefreshBufferMetrics();
             }
             catch (Exception e) { SetState("Ошибка состояния", TrayState.Error); stateDetail.Text = e.Message; }
+        }
+        void RefreshBufferMetrics()
+        {
+            if (recorder == null) return;
+            double seconds = recorder.BufferedSeconds;
+            bufferValue.Text = string.Format("{0:0} / {1} с", seconds, settings.Seconds); diskValue.Text = (recorder.DiskBytes / 1048576.0).ToString("0") + " МБ"; progress.Value = (float)(seconds / settings.Seconds);
         }
         void PowerChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
         { if (e.Mode == Microsoft.Win32.PowerModes.Resume && !IsDisposed) BeginInvoke(new Action(async delegate { if (recorder != null && !busy && !closing) { busy = true; try { await StopRecorder(); SetState("После сна включи буфер снова"); } finally { busy = false; SyncActions(); } } })); }
@@ -365,6 +370,8 @@ namespace ReplayLite
                 await SaveReplay();
                 if (lastReplay == null || !File.Exists(lastReplay) || !openLast.Enabled || !traySave.Enabled || trayState != TrayState.Recording) throw new Exception("Save action or tray state failed.");
                 report.AppendLine("LIVE_SAVE_ACTIONS_AND_TRAY: PASS");
+                if (recorder.BufferedSeconds > 2.1 || progress.Value > 2.1f / settings.Seconds || progress.Animating) throw new Exception("Saved buffer was not reset in the UI.");
+                report.AppendLine("LIVE_BUFFER_COUNTER_AND_PROGRESS_RESET: PASS");
                 await Toggle();
                 if (recorder != null || trayState != TrayState.Idle || traySave.Enabled || !duration.Enabled || !browse.Enabled) throw new Exception("Stop controls or idle icon failed.");
                 report.AppendLine("LIVE_STOP_ACTIONS_AND_TRAY: PASS");

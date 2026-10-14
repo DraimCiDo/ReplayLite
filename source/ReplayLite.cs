@@ -156,6 +156,7 @@ namespace ReplayLite
         Process process;
         System.Threading.Timer cleaner;
         string session;
+        string savedLastSegment;
         volatile bool stopping;
         public string Failure;
         public int ProcessId { get { return process == null ? 0 : process.Id; } }
@@ -200,6 +201,7 @@ namespace ReplayLite
             Directory.CreateDirectory(Config.Folder);
             Directory.CreateDirectory(Settings.Home);
             session = Path.Combine(Settings.Home, "buffer-" + Guid.NewGuid().ToString("N"));
+            savedLastSegment = null;
             Directory.CreateDirectory(session);
             Exception startupError = null;
             try
@@ -248,7 +250,7 @@ namespace ReplayLite
                         var p = line.Split(','); double start, end;
                         if (p.Length != 3 || !double.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out start) || !double.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out end)) continue;
                         var name = p[0].Trim('"');
-                        if (Path.GetFileName(name) == name && name.StartsWith("s") && name.EndsWith(".ts") && File.Exists(Path.Combine(session, name))) result.Add(new Segment { Name = name, Start = start, End = end });
+                        if ((savedLastSegment == null || string.CompareOrdinal(name, savedLastSegment) > 0) && Path.GetFileName(name) == name && name.StartsWith("s") && name.EndsWith(".ts") && File.Exists(Path.Combine(session, name))) result.Add(new Segment { Name = name, Start = start, End = end });
                     }
                 }
             }
@@ -281,7 +283,12 @@ namespace ReplayLite
                     if (stopping) return;
                     var all = Directory.GetFiles(session, "s*.ts").OrderBy(p => p, StringComparer.Ordinal).ToArray();
                     int keep = Config.Seconds / 2 + 5;
-                    foreach (var p in all.Take(Math.Max(0, all.Length - keep))) File.Delete(p);
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        bool consumed = savedLastSegment != null && string.CompareOrdinal(Path.GetFileName(all[i]), savedLastSegment) <= 0;
+                        if (consumed) TryDeleteConsumed(all[i]);
+                        else if (i < all.Length - keep) File.Delete(all[i]);
+                    }
                     if (new DriveInfo(Path.GetPathRoot(session)).AvailableFreeSpace < 128 * 1024 * 1024) Failure = "На диске осталось менее 128 МБ; запись остановлена.";
                 }
             }
@@ -289,10 +296,17 @@ namespace ReplayLite
         }
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern bool CreateHardLink(string newFile, string existingFile, IntPtr security);
+        void TryDeleteConsumed(string path)
+        {
+            // A successfully exported clip must stay successful even if another process locks an old segment.
+            // Maintain retries these files; the open segment and newer footage are never deleted.
+            try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
         public async Task<string> SaveAsync()
         {
             if (!await saver.WaitAsync(0)) throw new InvalidOperationException("Предыдущий повтор ещё сохраняется.");
             string snapshot = null, output = null, partial = null;
+            string exportedLast = null;
             try
             {
                 if (!Running) throw new InvalidOperationException("Сначала включи буфер.");
@@ -310,6 +324,7 @@ namespace ReplayLite
                     if (a.Count == 0) throw new InvalidOperationException("Буфер пока пуст.");
                     double end = a.Last().End;
                     var selected = a.Where(s => s.End > end - Config.Seconds + 0.05).ToArray();
+                    exportedLast = selected.Last().Name;
                     snapshot = Path.Combine(session, "save-" + Guid.NewGuid().ToString("N"));
                     Directory.CreateDirectory(snapshot);
                     var list = new List<string> { "ffconcat version 1.0" };
@@ -330,7 +345,19 @@ namespace ReplayLite
                     await Task.Run(delegate { if (!remux.WaitForExit(60000)) { remux.Kill(); remux.WaitForExit(); throw new TimeoutException("Сохранение заняло больше минуты."); } remux.WaitForExit(); });
                     if (remux.ExitCode != 0) throw new IOException("Не удалось сохранить повтор.\n" + log);
                 }
-                File.Move(partial, output); return output;
+                File.Move(partial, output);
+                lock (gate)
+                {
+                    savedLastSegment = exportedLast;
+                    // Commit the boundary only after the MP4 has its final name. Keep anything captured during export.
+                    try
+                    {
+                        if (session != null) foreach (var path in Directory.GetFiles(session, "s*.ts"))
+                            if (string.CompareOrdinal(Path.GetFileName(path), savedLastSegment) <= 0) TryDeleteConsumed(path);
+                    }
+                    catch (IOException) { } catch (UnauthorizedAccessException) { }
+                }
+                return output;
             }
             finally
             {
@@ -405,6 +432,7 @@ namespace ReplayLite
         {
             Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
+            if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
             if (args.Length == 2 && (args[0] == "--ui-test" || args[0] == "--ui-live-test"))
             {

@@ -38,6 +38,8 @@ jobs:
         run: ./source/build.ps1
       - name: Check EXE version and UI
         run: ./source/check-build.ps1
+      - name: Check replay buffer reset without GPU
+        run: ./source/check-buffer.ps1
       - name: Package portable application and setup
         run: ./source/package.ps1
       - name: Check installation and update rollback
