@@ -11,7 +11,7 @@ foreach ($name in $Names) {
     $signature = Get-AuthenticodeSignature -LiteralPath $file
     if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or -not $signature.TimeStamperCertificate) { throw "Trusted timestamped Authenticode signature required: $name" }
     if ($signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer) { throw "Self-signed certificate rejected: $name" }
-    if ([Diagnostics.FileVersionInfo]::GetVersionInfo($file).FileVersion -ne $version) { throw "Signed file version mismatch: $name" }
+    if ([Diagnostics.FileVersionInfo]::GetVersionInfo($file).FileVersion.Trim() -ne $version) { throw "Signed file version mismatch: $name" }
     $inputs += @{ Source=$file; Target=(Join-Path $TargetDirectory $name) }
 }
 # Validate every result before replacing any local build output. Trust comes from the configured signing policy.

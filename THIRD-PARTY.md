@@ -20,6 +20,12 @@ SHA256 оригинального ZIP, сверенный с контрольн�
 
 Текст лицензии: `licenses/NAudio-Ms-PL.txt`. Исходники: https://github.com/naudio/NAudio/tree/v1.10.0 . Оригинальный пакет: https://www.nuget.org/packages/NAudio/1.10.0 . В локальном переносимом архиве исходники также находятся в `third-party-source/NAudio-1.10.0.zip`.
 
+## Inno Setup
+
+Установщик собирается Inno Setup **7.1.0 x64**, Copyright © Jordan Russell, Martijn Laan и участники проекта. Компилятор используется только при сборке; в Portable ZIP его нет. Установочный движок распространяется в ReplayLite-Setup.exe согласно [лицензии Inno Setup](https://github.com/jrsoftware/issrc/blob/is-7_1_0/license.txt). Текст лицензии включён в `licenses/Inno-Setup.txt`.
+
+Официальный релиз: https://github.com/jrsoftware/issrc/releases/tag/is-7_1_0 . SHA-256 компилятора: `0362A383ED217D4C4239B5933866DD96D3EB2102737DA92F80F6057A4B40DF2F`. Загрузка также проверяется по доверенной Authenticode-подписи Pyrsys B.V.
+
 ## ReplayLite
 
 Исходники приложения включены в `source/`; пользователь может изменять и пересобирать их для своих задач. Репозиторий содержит исходники и сведения о зависимостях; двоичные файлы FFmpeg и NAudio скачиваются скриптом `source/setup-deps.ps1` из указанных выше источников с проверкой SHA256.

@@ -40,8 +40,14 @@ foreach ($archive in $archives) {
 $zipPath = Join-Path $outputRoot 'ReplayLite-Portable.zip'
 Compress-Archive -LiteralPath $stage -DestinationPath $zipPath -CompressionLevel Optimal -Force
 Copy-Item -LiteralPath (Join-Path $appRoot 'ReplayLite.exe') -Destination (Join-Path $outputRoot 'ReplayLite.exe') -Force
-$compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$outputRoot\ReplayLite-Setup.exe" "/win32manifest:$PSScriptRoot\app.manifest" "/win32icon:$appRoot\assets\ReplayLite.ico" "/resource:$zipPath,payload.zip" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:Microsoft.CSharp.dll "$PSScriptRoot\Deployment.cs" "$PSScriptRoot\Setup.cs" "$PSScriptRoot\Ui.cs" "$appRoot\.deps-cache\AssemblyInfo.cs"
+$compiler = & (Join-Path $PSScriptRoot 'setup-installer-toolchain.ps1')
+$version = [IO.File]::ReadAllText((Join-Path $appRoot 'VERSION')).Trim()
+# The ZIP remains the update/portable format. The installer gets individual files,
+# so 100 MB of compressed data no longer becomes the .NET assembly's code section.
+[IO.File]::WriteAllText((Join-Path $stage 'installed.flag'), 'ReplayLite', [Text.UTF8Encoding]::new($false))
+$manifest = @(Get-ChildItem -LiteralPath $stage -File -Recurse | ForEach-Object { $_.FullName.Substring($stage.Length + 1) }) + 'package-files.txt'
+[IO.File]::WriteAllLines((Join-Path $stage 'package-files.txt'), $manifest, [Text.UTF8Encoding]::new($false))
+& $compiler --quiet-progress --no-ide-signtools "--define=PackageRoot=$stage" "--define=OutputRoot=$outputRoot" "--define=AppVersion=$version" (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Setup build failed' }
 & (Join-Path $PSScriptRoot 'package-checksums.ps1') -OutputDirectory $outputRoot
 & (Join-Path $PSScriptRoot 'release-notes.ps1') -OutputPath (Join-Path $outputRoot 'RELEASE-NOTES.md')

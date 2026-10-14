@@ -33,7 +33,8 @@ namespace ReplayLite
                     }
                 }
                 string stage = Path.Combine(temp, "stage"), portable = Path.Combine(temp, "portable"), full = Path.Combine(temp, "full");
-                var assembly = Assembly.LoadFile(Path.GetFullPath(args[0])); using (var payload = assembly.GetManifestResourceStream("payload.zip")) { Assert(payload != null, "SETUP_EMBEDDED_PACKAGE"); Deployment.Extract(payload, stage); }
+                using (var payload = File.OpenRead(args[1])) Deployment.Extract(payload, stage);
+                Assert(FileVersionInfo.GetVersionInfo(args[0]).ProductName.Trim() == "ReplayLite", "SETUP_PRODUCT_METADATA");
                 Deployment.Apply(stage, portable, true); Deployment.Apply(stage, full, false);
                 Assert(File.Exists(Path.Combine(portable, "portable.flag")) && !File.Exists(Path.Combine(portable, "installed.flag")), "PORTABLE_MODE");
                 Assert(File.Exists(Path.Combine(full, "installed.flag")) && !File.Exists(Path.Combine(full, "portable.flag")), "INSTALLED_MODE");
