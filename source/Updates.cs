@@ -21,6 +21,16 @@ namespace ReplayLite
         const string ReleaseRoot = "https://github.com/DraimCiDo/ReplayLite/releases/download/";
         public static HttpClient Client()
         { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) }; client.DefaultRequestHeaders.UserAgent.ParseAdd("ReplayLite/" + Assembly.GetExecutingAssembly().GetName().Version); client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28"); return client; }
+        public static async Task<ReleaseInfo> Latest(CancellationToken token)
+        {
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            using (var client = Client())
+            {
+                timeout.CancelAfter(15000);
+                using (var response = await client.GetAsync("https://api.github.com/repos/DraimCiDo/ReplayLite/releases/latest", timeout.Token))
+                { response.EnsureSuccessStatusCode(); return Parse(await response.Content.ReadAsStringAsync()); }
+            }
+        }
         public static ReleaseInfo Parse(string json)
         {
             var value = new JavaScriptSerializer { MaxJsonLength = 1024 * 1024 }.Deserialize<Dictionary<string, object>>(json);
@@ -58,24 +68,28 @@ namespace ReplayLite
     {
         readonly Label status = new Label(); readonly ActionButton button = new ActionButton { Fill = Theme.Accent, ForeColor = Color.FromArgb(9, 37, 29), BackColor = Theme.Background }; readonly CancellationTokenSource cancel = new CancellationTokenSource();
         readonly Func<string, Task> apply; ReleaseInfo release; bool downloading;
-        public UpdateForm(Func<string, Task> applyUpdate)
+        public UpdateForm(Func<string, Task> applyUpdate, ReleaseInfo available = null)
         {
             apply = applyUpdate; Text = "Обновление ReplayLite"; ClientSize = new Size(485, 185); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent; Font = new Font("Segoe UI", 10); BackColor = Theme.Background; ForeColor = Theme.Text;
             status.SetBounds(24, 22, 437, 85); button.SetBounds(24, 123, 437, 36); button.Text = "Проверка…"; button.Enabled = false; Controls.AddRange(new Control[] { status, button });
-            Shown += async delegate { await Check(); }; button.Click += async delegate { if (release == null) await Check(); else await Download(); }; FormClosing += delegate { cancel.Cancel(); };
+            Shown += async delegate { if (available == null) await Check(); else { release = available; ShowRelease(); button.Enabled = true; } }; button.Click += async delegate { if (release == null) await Check(); else await Download(); }; FormClosing += delegate { cancel.Cancel(); };
         }
         async Task Check()
         {
             button.Enabled = false; status.Text = "Проверяю GitHub Releases…";
             try
             {
-                using (var client = Updates.Client()) { using (var response = await client.GetAsync("https://api.github.com/repos/DraimCiDo/ReplayLite/releases/latest", cancel.Token)) { response.EnsureSuccessStatusCode(); release = Updates.Parse(await response.Content.ReadAsStringAsync()); } }
-                Version current = Assembly.GetExecutingAssembly().GetName().Version;
-                if (release.Version <= current) { release = null; status.Text = "Установлена актуальная версия " + current.ToString(3) + "."; button.Text = "Проверить снова"; }
-                else { status.Text = "Доступна версия " + release.Version.ToString(3) + ".\nПосле скачивания буфер остановится, приложение перезапустится. Настройки и записи сохранятся."; button.Text = "Обновить до " + release.Version.ToString(3); }
+                release = await Updates.Latest(cancel.Token);
+                if (!IsDisposed && !cancel.IsCancellationRequested) ShowRelease();
             }
             catch (Exception e) { if (!cancel.IsCancellationRequested) { release = null; status.Text = "Не удалось проверить: " + e.Message; button.Text = "Повторить проверку"; } }
             finally { if (!IsDisposed) button.Enabled = true; }
+        }
+        void ShowRelease()
+        {
+            Version current = Assembly.GetExecutingAssembly().GetName().Version;
+            if (release.Version <= current) { release = null; status.Text = "Установлена актуальная версия " + current.ToString(3) + "."; button.Text = "Проверить снова"; }
+            else { status.Text = "Доступна версия " + release.Version.ToString(3) + ".\nПосле скачивания буфер остановится, приложение перезапустится. Настройки и записи сохранятся."; button.Text = "Обновить до " + release.Version.ToString(3); }
         }
         async Task Download()
         {

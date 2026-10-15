@@ -92,6 +92,21 @@ namespace ReplayLite
         }
         protected override void Dispose(bool disposing) { if (disposing) tween.Dispose(); base.Dispose(disposing); }
     }
+    sealed class ToggleSwitch : CheckBox
+    {
+        public ToggleSwitch()
+        { Theme.Canvas(this); AutoSize = false; Cursor = Cursors.Hand; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float y = (Height - 22) / 2f;
+            using (var path = Theme.Round(new RectangleF(Width - 44, y, 42, 22), 11))
+            using (var brush = new SolidBrush(Enabled && Checked ? Theme.Accent : Theme.Input)) e.Graphics.FillPath(brush, path);
+            using (var brush = new SolidBrush(Enabled ? (Checked ? Theme.Background : Theme.Muted) : Theme.Border)) e.Graphics.FillEllipse(brush, Width - (Checked ? 21 : 41), y + 3, 16, 16);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(0, 0, Width - 53, Height), Enabled ? ForeColor : Theme.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(1, 1, Width - 3, Height - 3), Theme.Text, BackColor);
+        }
+    }
     sealed class SelectBox : Control
     {
         public readonly List<object> Items = new List<object>();
@@ -108,7 +123,14 @@ namespace ReplayLite
         internal void Open()
         {
             if (!Enabled || Items.Count == 0) return;
-            if (popup == null) popup = new RoundedMenu { Font = Font };
+            if (popup == null)
+            {
+                popup = new RoundedMenu { Font = Font };
+                // WinForms dismisses menus before forwarding the owner's click.
+                // Keep this dismissal for OnMouseDown so the click closes, rather than reopens, it.
+                popup.Closing += delegate(object sender, ToolStripDropDownClosingEventArgs e)
+                { if (e.CloseReason == ToolStripDropDownCloseReason.AppClicked && ClientRectangle.Contains(PointToClient(Cursor.Position))) e.Cancel = true; };
+            }
             if (popup.Visible) return;
             for (int i = popup.Items.Count - 1; i >= 0; i--) popup.Items[i].Dispose();
             popup.Items.Clear(); popup.MinimumSize = new Size(Width, 0);
@@ -122,11 +144,12 @@ namespace ReplayLite
         protected override void OnVisibleChanged(EventArgs e) { if (!Visible && popup != null) popup.Close(); base.OnVisibleChanged(e); }
         protected override void OnEnabledChanged(EventArgs e) { if (!Enabled && popup != null) popup.Close(); Invalidate(); base.OnEnabledChanged(e); }
         protected override void Dispose(bool disposing) { if (disposing && popup != null) { popup.Dispose(); popup = null; } base.Dispose(disposing); }
-        protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left) Open(); base.OnMouseDown(e); }
+        internal void TogglePopup() { if (popup != null && popup.Visible) ClosePopup(); else Open(); }
+        protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left) TogglePopup(); base.OnMouseDown(e); }
         protected override bool IsInputKey(Keys key) { return key == Keys.Up || key == Keys.Down || base.IsInputKey(key); }
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter || (e.Alt && e.KeyCode == Keys.Down)) { Open(); e.Handled = true; }
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter || (e.Alt && e.KeyCode == Keys.Down)) { TogglePopup(); e.Handled = true; }
             else if (e.KeyCode == Keys.Up && index > 0) { SelectedIndex--; e.Handled = true; }
             else if (e.KeyCode == Keys.Down && index < Items.Count - 1) { SelectedIndex++; e.Handled = true; }
             base.OnKeyDown(e);

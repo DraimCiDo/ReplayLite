@@ -25,7 +25,7 @@ namespace ReplayLite
                 {
                     using (var client = Updates.Client())
                     {
-                        var release = Updates.Parse(client.GetStringAsync("https://api.github.com/repos/DraimCiDo/ReplayLite/releases/latest").GetAwaiter().GetResult());
+                        var release = Updates.Latest(System.Threading.CancellationToken.None).GetAwaiter().GetResult();
                         string zip = Path.Combine(temp, "latest.zip"), sums = client.GetStringAsync(release.Sums).GetAwaiter().GetResult();
                         Updates.Download(client, release.Zip, zip, System.Threading.CancellationToken.None, new QuietProgress()).GetAwaiter().GetResult(); Updates.Verify(zip, sums);
                         string networkStage = Path.Combine(temp, "stage"); using (var stream = File.OpenRead(zip)) Deployment.Extract(stream, networkStage);

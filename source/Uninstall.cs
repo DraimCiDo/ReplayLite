@@ -23,6 +23,7 @@ namespace ReplayLite
                 if (Process.GetProcessesByName("ReplayLite").Length != 0) throw new IOException("Закрой ReplayLite через меню трея.");
                 string manifest = Path.Combine(root, "package-files.txt");
                 if (!File.Exists(manifest)) throw new IOException("Список файлов установки отсутствует.");
+                StartupRegistration.SetEnabled(Path.Combine(root, "ReplayLite.exe"), false);
                 foreach (string relative in File.ReadAllLines(manifest)) { string path = Deployment.Child(root, relative); if (path != Assembly.GetExecutingAssembly().Location && File.Exists(path)) File.Delete(path); }
                 bool registered; using (var key = Registry.CurrentUser.OpenSubKey(RegistryPath)) registered = key != null && string.Equals((string)key.GetValue("InstallLocation"), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
                 if (registered) { Registry.CurrentUser.DeleteSubKeyTree(RegistryPath, false); foreach (string folder in new[] { Environment.GetFolderPath(Environment.SpecialFolder.Programs), Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) }) { string shortcut = Path.Combine(folder, "ReplayLite.lnk"); if (File.Exists(shortcut)) File.Delete(shortcut); } }

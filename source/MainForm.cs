@@ -18,6 +18,12 @@ namespace ReplayLite
         List<MonitorChoice> monitors = new List<MonitorChoice>();
         bool hotkeyRegistered;
         readonly ActionButton update = new ActionButton(); bool updating, monitorRefresh;
+        readonly ToggleSwitch startup = new ToggleSwitch(); readonly Label startupInfo = new Label();
+        readonly bool startInTray;
+        readonly System.Threading.CancellationTokenSource updateCancel = new System.Threading.CancellationTokenSource();
+        DateTime nextUpdateCheck = DateTime.MaxValue;
+        bool checkingUpdates, updateDialogOpen, startupChanging, lastBalloonWasUpdate;
+        ReleaseInfo availableRelease; Version notifiedVersion;
         readonly TextBox folder = new TextBox();
         readonly ActionButton start = new ActionButton(), save = new ActionButton(), browse = new ActionButton(), openLast = new ActionButton(), openFolder = new ActionButton();
         readonly Panel recordingPage = new Panel(), settingsPage = new Panel();
@@ -28,7 +34,7 @@ namespace ReplayLite
         readonly Label cpuValue = new Label(), ramValue = new Label(), bufferValue = new Label(), diskValue = new Label();
         readonly StatusBadge badge = new StatusBadge(); readonly BufferBar progress = new BufferBar();
         readonly NotifyIcon tray = new NotifyIcon();
-        readonly ToolStripMenuItem traySave = new ToolStripMenuItem(), trayToggle = new ToolStripMenuItem();
+        readonly ToolStripMenuItem traySave = new ToolStripMenuItem(), trayToggle = new ToolStripMenuItem(), trayUpdate = new ToolStripMenuItem();
         readonly Timer timer = new Timer { Interval = 1000 };
         readonly ToolTip tips = new ToolTip();
         readonly Icon[] icons = { AppIcons.Create(TrayState.Idle), AppIcons.Create(TrayState.Recording), AppIcons.Create(TrayState.Saving), AppIcons.Create(TrayState.Error) };
@@ -39,18 +45,18 @@ namespace ReplayLite
         string lastReplay;
         readonly Stopwatch clock = Stopwatch.StartNew();
 
-        public MainForm()
+        public MainForm(bool launchInTray = false, bool testMode = false)
         {
+            startInTray = launchInTray; testing = testMode;
             Text = "ReplayLite v" + appVersion; ClientSize = new Size(760, 480); FormBorderStyle = FormBorderStyle.FixedSingle; MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen; BackColor = Theme.Background; ForeColor = Theme.Text; Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
             Icon = icons[(int)TrayState.Recording]; DoubleBuffered = true;
             var logo = new PictureBox { Image = brand, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background }; logo.SetBounds(20, 17, 48, 48); Controls.Add(logo);
             LabelAt(this, "ReplayLite", 79, 12, 165, 35, 21, true, Theme.Text);
             versionLabel.Text = "v" + appVersion; versionLabel.SetBounds(247, 23, 100, 23); versionLabel.Font = new Font("Segoe UI", 9); versionLabel.ForeColor = Theme.Muted; Controls.Add(versionLabel);
-            LabelAt(this, "Сохраните последние минуты экрана", 81, 51, 440, 24, 9, false, Theme.Muted);
             badge.SetBounds(564, 17, 176, 32); Controls.Add(badge);
             StyleButton(update, "Проверить обновления", this, 564, 53, 176, 26, false); update.Font = new Font("Segoe UI", 9);
-            update.Click += async delegate { if (updating) return; using (var dialog = new UpdateForm(ApplyUpdate)) dialog.ShowDialog(this); if (updating) await Quit(); };
+            update.Click += async delegate { await OpenUpdates(); };
             StyleButton(recordingTab, "Запись", this, 20, 88, 140, 32, false);
             StyleButton(settingsTab, "Настройки", this, 168, 88, 164, 32, false);
             recordingTab.Click += delegate { ShowSettings(false); }; settingsTab.Click += delegate { ShowSettings(true); };
@@ -99,6 +105,15 @@ namespace ReplayLite
             browse.Click += delegate { using (var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Папка для сохранённых MP4" }) if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = dialog.SelectedPath; CaptureOptionsChanged(this, EventArgs.Empty); } };
             foreach (var control in new Control[] { duration, display, sound, hotkey, fps, rate }) control.Height = 36;
             foreach (var control in new Control[] { sound, fps, rate }) control.Height = 34;
+            startup.SetBounds(370, 211, 334, 32); startup.Font = new Font("Segoe UI", 9); startup.Text = "Запускать с Windows"; options.Controls.Add(startup);
+            startupInfo.SetBounds(370, 247, 334, 31); startupInfo.BackColor = Theme.Card; startupInfo.ForeColor = Theme.Muted; startupInfo.Font = new Font("Segoe UI", 8); startupInfo.Text = Settings.Portable ? "Запуск в трее. Для Portable\nне перемещайте папку программы." : "Запуск в трее после входа в Windows."; options.Controls.Add(startupInfo);
+            if (!testing) try { startup.Checked = StartupRegistration.Enabled(Application.ExecutablePath); } catch (Exception error) { startup.Enabled = false; startupInfo.Text = "Не удалось прочитать автозапуск."; tips.SetToolTip(startupInfo, error.Message); }
+            startup.CheckedChanged += delegate
+            {
+                if (testing || startupChanging) return;
+                try { StartupRegistration.SetEnabled(Application.ExecutablePath, startup.Checked); }
+                catch (Exception error) { startupChanging = true; startup.Checked = !startup.Checked; startupChanging = false; startupInfo.Text = "Не удалось изменить автозапуск."; tips.SetToolTip(startupInfo, error.Message); }
+            };
             foreach (var select in new[] { duration, fps, sound, display }) select.SelectedIndexChanged += CaptureOptionsChanged;
             rate.ValueChanged += CaptureOptionsChanged;
             tips.SetToolTip(display, "Записывается весь выбранный экран. Для записи монитор должен быть подключён к NVIDIA.");
@@ -113,7 +128,9 @@ namespace ReplayLite
             traySave.Text = "Сохранить повтор"; traySave.Enabled = false; traySave.Click += async delegate { await SaveReplay(); }; menu.Items.Add(traySave);
             trayToggle.Text = "Включить буфер"; trayToggle.Click += async delegate { await Toggle(); }; menu.Items.Add(trayToggle);
             menu.Items.Add("Папка повторов", menu.AddIcon(MenuGlyph.Folder), delegate { OpenFolder(); }); menu.Items.Add(new ToolStripSeparator()); menu.Items.Add("Выход", menu.AddIcon(MenuGlyph.Exit), async delegate { await Quit(); }); tray.ContextMenuStrip = menu;
+            trayUpdate.Text = "Доступно обновление"; trayUpdate.Image = menu.AddIcon(MenuGlyph.Open); trayUpdate.Visible = false; trayUpdate.Click += async delegate { await OpenUpdates(); }; menu.Items.Insert(1, trayUpdate);
             tray.DoubleClick += delegate { Restore(); };
+            tray.BalloonTipClicked += async delegate { if (lastBalloonWasUpdate && availableRelease != null) await OpenUpdates(); };
             menu.Opening += delegate { if (recorder != null && recorder.Running && !busy) UpdateSaveAvailability(recorder.BufferedSeconds); };
             SetState("Готово к записи");
             timer.Tick += async delegate { await RefreshState(); }; timer.Start();
@@ -168,6 +185,34 @@ namespace ReplayLite
         void StyleButton(ActionButton button, string text, Control parent, int x, int y, int width, int height, bool accent)
         { button.Text = text; button.SetBounds(x, y, width, height); button.BackColor = parent is CardPanel ? Theme.Card : Theme.Background; button.Font = new Font("Segoe UI", 10, FontStyle.Bold); button.ForeColor = accent ? Color.FromArgb(9, 37, 29) : Theme.Text; button.Fill = accent ? Theme.Accent : Theme.Input; parent.Controls.Add(button); }
         void StopAnimations() { foreach (var button in new[] { start, save, browse, openFolder, openLast, update, recordingTab, settingsTab }) button.FinishAnimation(); progress.FinishAnimation(); badge.FinishAnimation(); }
+        async Task OpenUpdates()
+        {
+            if (updating || updateDialogOpen || closing || released) return;
+            updateDialogOpen = true; Restore();
+            try { using (var dialog = new UpdateForm(ApplyUpdate, availableRelease)) dialog.ShowDialog(this); }
+            finally { updateDialogOpen = false; }
+            if (updating) await Quit();
+        }
+        async Task CheckForUpdates()
+        {
+            if (checkingUpdates || closing || released || testing) return;
+            checkingUpdates = true; nextUpdateCheck = DateTime.UtcNow.AddHours(6);
+            try { var release = await Updates.Latest(updateCancel.Token); if (!released && !closing) SetAvailableRelease(release); }
+            catch (Exception) { /* Automatic checks stay quiet when offline or rate limited. */ }
+            finally { checkingUpdates = false; }
+        }
+        bool SetAvailableRelease(ReleaseInfo release)
+        {
+            availableRelease = release != null && release.Version > typeof(MainForm).Assembly.GetName().Version ? release : null;
+            update.Text = availableRelease == null ? "Проверить обновления" : "Обновить до " + availableRelease.Version.ToString(3);
+            update.Fill = availableRelease == null ? Theme.Input : Theme.Accent;
+            update.ForeColor = availableRelease == null ? Theme.Text : Theme.Background;
+            trayUpdate.Visible = availableRelease != null; trayUpdate.Text = update.Text;
+            if (availableRelease == null || availableRelease.Version == notifiedVersion) return false;
+            notifiedVersion = availableRelease.Version;
+            if (!testing) { lastBalloonWasUpdate = true; tray.ShowBalloonTip(5000, "Доступно обновление ReplayLite", "Версия " + notifiedVersion.ToString(3) + ". Нажмите, чтобы открыть обновление.", ToolTipIcon.Info); }
+            return true;
+        }
         int ActiveAnimations { get { int count = 0; foreach (var button in new[] { start, save, browse, openFolder, openLast, update, recordingTab, settingsTab }) if (button.Animating) count++; return count + (progress.Animating ? 1 : 0) + (badge.Animating ? 1 : 0); } }
         void SetState(string text, TrayState? explicitState = null)
         {
@@ -191,6 +236,7 @@ namespace ReplayLite
             trayToggle.Enabled = start.Enabled; trayToggle.Text = active ? "Остановить запись" : "Начать запись";
             hotkey.Enabled = !busy && !closing;
             update.Enabled = !busy && !saving && !closing && !updating;
+            trayUpdate.Enabled = update.Enabled;
             UpdateHotkeyLabels();
         }
         void UpdateSaveAvailability(double seconds)
@@ -264,12 +310,13 @@ namespace ReplayLite
             if (recorder == null || busy || saving || closing) return;
             if (recorder.BufferedSeconds <= 0) { UpdateSaveAvailability(0); SetState("Накапливаем первые кадры…", TrayState.Recording); return; }
             saving = true; SetState("Сохраняю повтор…", TrayState.Saving);
-            try { var output = await recorder.SaveAsync(); lastReplay = output; openLast.Enabled = true; RefreshBufferMetrics(); progress.FinishAnimation(); SetState("Сохранено: " + Path.GetFileName(output)); if (!testing) tray.ShowBalloonTip(3000, "Повтор сохранён", output, ToolTipIcon.Info); }
+            try { var output = await recorder.SaveAsync(); lastReplay = output; openLast.Enabled = true; RefreshBufferMetrics(); progress.FinishAnimation(); SetState("Сохранено: " + Path.GetFileName(output)); if (!testing) { lastBalloonWasUpdate = false; tray.ShowBalloonTip(3000, "Повтор сохранён", output, ToolTipIcon.Info); } }
             catch (Exception e) { ShowError(e.Message); SetState("Ошибка сохранения", TrayState.Error); }
             finally { saving = false; SyncActions(); }
         }
         async Task RefreshState()
         {
+            if (!testing && !closing && !released && DateTime.UtcNow >= nextUpdateCheck) { var pending = CheckForUpdates(); }
             if (recorder == null || busy || closing) return;
             if (recorder.Failure != null || !recorder.Running)
             { busy = true; string message = recorder.Failure ?? ("Запись остановлена.\n" + recorder.ErrorLog); await StopRecorder(); SetState("Захват остановлен", TrayState.Error); ShowError(message); busy = false; SyncActions(); return; }
@@ -323,15 +370,15 @@ namespace ReplayLite
         }
         void ReleaseUi()
         {
-            if (released) return; released = true; timer.Stop(); timer.Dispose(); StopAnimations();
+            if (released) return; released = true; updateCancel.Cancel(); updateCancel.Dispose(); timer.Stop(); timer.Dispose(); StopAnimations();
             Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
             if (IsHandleCreated) Native.UnregisterHotKey(Handle, 1);
             tray.Visible = false; var menu = tray.ContextMenuStrip; tray.Dispose(); if (menu != null) menu.Dispose(); tips.Dispose();
             Icon = null; foreach (var icon in icons) icon.Dispose(); brand.Dispose();
         }
         protected override void Dispose(bool disposing) { if (disposing) ReleaseUi(); base.Dispose(disposing); }
-        protected override void OnShown(EventArgs e)
-        { base.OnShown(e); RegisterConfiguredHotkey(); }
+        protected override async void OnShown(EventArgs e)
+        { base.OnShown(e); RegisterConfiguredHotkey(); if (startInTray) Hide(); if (!testing) await CheckForUpdates(); }
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == 1) { if (!hotkey.IsCapturing) { var pending = SaveReplay(); } return; }
@@ -373,11 +420,26 @@ namespace ReplayLite
             foreach (var select in new[] { duration, fps, sound, display })
             {
                 int initial = select.SelectedIndex;
+                select.TogglePopup(); await Task.Delay(25); if (!select.PopupForTest.Visible) throw new Exception("First dropdown click did not open.");
+                select.TogglePopup(); await Task.Delay(25); if (select.PopupForTest.Visible || select.SelectedIndex != initial) throw new Exception("Second dropdown click did not close without changing selection.");
                 for (int i = 0; i < 5; i++) { select.Open(); await Task.Delay(25); VerifyMenuForTest(select.PopupForTest, false); select.PickForTest((initial + 1) % select.Items.Count); await Task.Delay(25); if (select.SelectedIndex != (initial + 1) % select.Items.Count) throw new Exception("Dropdown selection failed."); }
                 select.SelectedIndex = initial;
             }
             report.AppendLine("DROPDOWN_REOPEN_AND_PICK_20_TIMES: PASS");
             report.AppendLine("DROPDOWN_FULL_WIDTH_HIGHLIGHT_AND_ROUND_CORNERS: PASS");
+            report.AppendLine("DROPDOWN_SECOND_CLICK_CLOSES: PASS");
+            VerifyStartupForTest(); report.AppendLine("STARTUP_REGISTRY_QUOTING_ENABLE_DISABLE_OWNERSHIP: PASS");
+            using (var launch = new MainForm(true, true))
+            {
+                launch.Show(); await Task.Delay(25);
+                if (launch.Visible || !launch.tray.Visible || launch.recorder != null) throw new Exception("Startup did not remain in the tray without capture.");
+            }
+            report.AppendLine("STARTUP_LAUNCH_HIDDEN_NO_CAPTURE: PASS");
+            var newer = new ReleaseInfo { Version = new Version(99, 1, 2, 0) };
+            if (!SetAvailableRelease(newer) || !trayUpdate.Available || !update.Text.Contains("99.1.2") || SetAvailableRelease(newer)) throw new Exception("Update notification missing or repeated.");
+            var updateMenu = (RoundedMenu)tray.ContextMenuStrip; updateMenu.Show(this, new Point(30, 100)); await Task.Delay(25); VerifyMenuForTest(updateMenu, true, 6); updateMenu.Close();
+            if (SetAvailableRelease(new ReleaseInfo { Version = typeof(MainForm).Assembly.GetName().Version }) || trayUpdate.Available || availableRelease != null) throw new Exception("Current version offered as an update.");
+            report.AppendLine("UPDATE_NOTICE_NEW_VERSION_ONLY_NO_DUPLICATE: PASS");
             var trayMenu = (RoundedMenu)tray.ContextMenuStrip;
             trayMenu.Show(this, new Point(30, 100)); await Task.Delay(25);
             VerifyMenuForTest(trayMenu, true); trayMenu.Close();
@@ -420,6 +482,23 @@ namespace ReplayLite
                 if (!parent.ClientRectangle.Contains(control.Bounds)) throw new Exception("Control extends beyond its container: " + control.Text);
                 VerifyControlBoundsForTest(control);
             }
+        }
+        static void VerifyStartupForTest()
+        {
+            string registryPath = @"Software\ReplayLite\StartupTests\" + Guid.NewGuid().ToString("N");
+            string executable = Path.Combine(Path.GetTempPath(), "ReplayLite test space", "ReplayLite.exe");
+            try
+            {
+                if (StartupRegistration.Enabled(executable, registryPath)) throw new Exception("Startup enabled by default.");
+                StartupRegistration.SetEnabled(executable, true, registryPath);
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(registryPath)) if ((string)key.GetValue("ReplayLite") != "\"" + executable + "\" --startup") throw new Exception("Startup path is not quoted.");
+                if (!StartupRegistration.Enabled(executable, registryPath)) throw new Exception("Startup registration not persisted.");
+                StartupRegistration.SetEnabled(executable + ".other", false, registryPath);
+                if (!StartupRegistration.Enabled(executable, registryPath)) throw new Exception("Another copy removed startup.");
+                StartupRegistration.SetEnabled(executable, false, registryPath);
+                if (StartupRegistration.Enabled(executable, registryPath)) throw new Exception("Startup registration not removed.");
+            }
+            finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(registryPath, false); }
         }
         void VerifyCaptureOptionsForTest()
         {
@@ -464,18 +543,18 @@ namespace ReplayLite
             busy = true; await StopRecorder(); busy = false; lastReplay = null; openLast.Enabled = false; SetState("Готово к записи"); Deployment.Cleanup(root);
             if (failure != null) throw failure;
         }
-        static void VerifyMenuForTest(RoundedMenu menu, bool withIcons)
+        static void VerifyMenuForTest(RoundedMenu menu, bool withIcons, int expectedCommands = 5)
         {
             if (!menu.Visible || menu.Region == null || menu.Region.IsVisible(0, 0) || !menu.Region.IsVisible(menu.Width / 2, 1)) throw new Exception("Menu corners are not rounded.");
             ToolStripItem first = null, last = null; int count = 0;
             foreach (ToolStripItem item in menu.Items)
             {
-                if (!(item is ToolStripMenuItem)) continue;
+                if (!(item is ToolStripMenuItem) || !item.Available) continue;
                 if (item.Bounds.Right < menu.ClientSize.Width - 2) throw new Exception("Menu row does not span the popup: " + item.Bounds + " / " + menu.ClientSize);
                 if (withIcons && item.Image == null) throw new Exception("Tray command has no icon.");
                 if (first == null) first = item; last = item; count++;
             }
-            if (first == null || last == null || (withIcons && count != 5)) throw new Exception("Menu commands missing.");
+            if (first == null || last == null || (withIcons && count != expectedCommands)) throw new Exception("Menu commands missing.");
             first.Select(); menu.Refresh();
             using (var image = new Bitmap(menu.Width, menu.Height))
             {

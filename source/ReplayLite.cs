@@ -436,7 +436,7 @@ namespace ReplayLite
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
             if (args.Length == 2 && (args[0] == "--ui-test" || args[0] == "--ui-live-test"))
             {
-                using (var form = new MainForm())
+                using (var form = new MainForm(false, true))
                 {
                     int exitCode = 1;
                     form.Shown += async delegate { try { if (args[0] == "--ui-live-test") await form.VerifyLiveUiAsync(args[1]); else await form.VerifyUiAsync(args[1]); exitCode = 0; } catch (Exception error) { File.WriteAllText(args[0] == "--ui-live-test" ? Path.Combine(args[1], "ui-live-test.txt") : args[1], error.ToString()); } finally { Application.ExitThread(); } };
@@ -445,7 +445,7 @@ namespace ReplayLite
             }
             if (args.Length == 2 && (args[0] == "--screenshot" || args[0] == "--settings-screenshot"))
             {
-                using (var form = new MainForm())
+                using (var form = new MainForm(false, true))
                 {
                     if (args[0] == "--settings-screenshot") form.PreviewSettingsForDocs(); else form.PreviewForDocs(); form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
                     using (var image = new Bitmap(form.Width, form.Height))
@@ -455,8 +455,9 @@ namespace ReplayLite
             }
             using (var singleton = new Mutex(true, "Local\\ReplayLite.Main", out SingletonCreated))
             {
-                if (!SingletonCreated) { MessageBox.Show("ReplayLite уже запущен. Открой его из трея."); return 0; }
-                Application.Run(new MainForm()); return 0;
+                bool launchInTray = Array.IndexOf(args, "--startup") >= 0;
+                if (!SingletonCreated) { if (!launchInTray) MessageBox.Show("ReplayLite уже запущен. Открой его из трея."); return 0; }
+                Application.Run(new MainForm(launchInTray)); return 0;
             }
         }
         static bool SingletonCreated;
