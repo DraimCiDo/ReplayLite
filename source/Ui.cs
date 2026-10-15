@@ -80,12 +80,13 @@ namespace ReplayLite
             using (var path = Theme.Round(new RectangleF(1, 1, Width - 2, Height - 2), 12))
             using (var brush = new SolidBrush(current)) e.Graphics.FillPath(brush, path);
             var color = Enabled ? ForeColor : Color.FromArgb(133, 146, 165);
-            if (Detail.Length == 0) TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            const TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+            if (Detail.Length == 0) TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, color, flags);
             else
             {
                 int y = Math.Max(4, (Height - 49) / 2);
-                TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(0, y, Width, 25), color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                using (var small = new Font("Segoe UI", 8.5f)) TextRenderer.DrawText(e.Graphics, Detail, small, new Rectangle(0, y + 26, Width, 22), color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(8, y, Width - 16, 25), color, flags);
+                using (var small = new Font("Segoe UI", 8.5f)) TextRenderer.DrawText(e.Graphics, Detail, small, new Rectangle(8, y + 26, Width - 16, 22), color, flags);
             }
             if (Focused && ShowFocusCues) { using (var path = Theme.Round(new RectangleF(4, 4, Width - 8, Height - 8), 9)) using (var pen = new Pen(Theme.Blue)) e.Graphics.DrawPath(pen, path); }
         }
@@ -94,20 +95,22 @@ namespace ReplayLite
     sealed class SelectBox : Control
     {
         public readonly List<object> Items = new List<object>();
-        ContextMenuStrip popup;
+        RoundedMenu popup;
         int index = -1;
+        public event EventHandler SelectedIndexChanged;
         public int SelectedIndex
         {
             get { return index; }
-            set { if (value < -1 || value >= Items.Count) throw new ArgumentOutOfRangeException("value"); index = value; Text = index < 0 ? "" : Items[index].ToString(); Invalidate(); }
+            set { if (value < -1 || value >= Items.Count) throw new ArgumentOutOfRangeException("value"); bool changed = index != value; index = value; Text = index < 0 ? "" : Items[index].ToString(); Invalidate(); if (changed && SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty); }
         }
         public SelectBox()
         { Theme.Canvas(this); BackColor = Theme.Card; Cursor = Cursors.Hand; TabStop = true; AccessibleRole = AccessibleRole.ComboBox; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
         internal void Open()
         {
             if (!Enabled || Items.Count == 0) return;
-            if (popup == null) popup = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), BackColor = Theme.Input, ForeColor = Theme.Text, Font = Font, ShowImageMargin = false };
+            if (popup == null) popup = new RoundedMenu { Font = Font };
             if (popup.Visible) return;
+            for (int i = popup.Items.Count - 1; i >= 0; i--) popup.Items[i].Dispose();
             popup.Items.Clear(); popup.MinimumSize = new Size(Width, 0);
             for (int i = 0; i < Items.Count; i++) { int choice = i; var item = popup.Items.Add(Items[i].ToString()); item.Click += delegate { SelectedIndex = choice; }; }
             // Closed is raised while ToolStrip still uses its native window. Dispose only with the owner.
@@ -115,6 +118,7 @@ namespace ReplayLite
         }
         internal void PickForTest(int choice) { if (popup == null || !popup.Visible) throw new InvalidOperationException("Popup not open"); popup.Items[choice].PerformClick(); popup.Close(); }
         internal void ClosePopup() { if (popup != null) popup.Close(); }
+        internal RoundedMenu PopupForTest { get { return popup; } }
         protected override void OnVisibleChanged(EventArgs e) { if (!Visible && popup != null) popup.Close(); base.OnVisibleChanged(e); }
         protected override void OnEnabledChanged(EventArgs e) { if (!Enabled && popup != null) popup.Close(); Invalidate(); base.OnEnabledChanged(e); }
         protected override void Dispose(bool disposing) { if (disposing && popup != null) { popup.Dispose(); popup = null; } base.Dispose(disposing); }
@@ -176,12 +180,86 @@ namespace ReplayLite
         }
         protected override void Dispose(bool disposing) { if (disposing) tween.Dispose(); base.Dispose(disposing); }
     }
+    sealed class RoundedMenu : ContextMenuStrip
+    {
+        readonly List<Image> ownedImages = new List<Image>();
+        public RoundedMenu()
+        { Renderer = new DarkMenuRenderer(); BackColor = Theme.Input; ForeColor = Theme.Text; ShowImageMargin = false; ShowCheckMargin = false; }
+        // MinimumSize stretches the window, but WinForms still lays out rows using
+        // their text width. Include the requested width in the actual row metrics.
+        protected override Size MaxItemSize
+        { get { var size = base.MaxItemSize; size.Width = Math.Max(size.Width, MinimumSize.Width - 2); return size; } }
+        internal int CornerRadius { get { return Math.Max(8, Font.Height / 2); } }
+        void ClipCorners()
+        {
+            if (Width < 2 || Height < 2) return;
+            using (var path = Theme.Round(new RectangleF(0, 0, Width, Height), CornerRadius))
+            { var previous = Region; Region = new Region(path); if (previous != null) previous.Dispose(); }
+        }
+        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); ClipCorners(); }
+        protected override void OnOpened(EventArgs e) { ClipCorners(); base.OnOpened(e); }
+        internal Image AddIcon(MenuGlyph glyph)
+        { var image = MenuIcons.Draw(ImageScalingSize.Width, glyph); ownedImages.Add(image); return image; }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { foreach (var image in ownedImages) image.Dispose(); ownedImages.Clear(); }
+            base.Dispose(disposing);
+        }
+    }
     sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
     {
+        internal static readonly Color Selection = Color.FromArgb(45, 58, 76);
+        public DarkMenuRenderer() { RoundedEdges = false; }
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e) { e.Graphics.Clear(Theme.Input); }
-        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e) { if (e.Item.Selected) using (var brush = new SolidBrush(Color.FromArgb(45, 58, 76))) e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size)); }
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) { using (var brush = new SolidBrush(Theme.Input)) e.Graphics.FillRectangle(brush, e.AffectedBounds); }
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected || !e.Item.Enabled) return;
+            var smoothing = e.Graphics.SmoothingMode; e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(new RectangleF(3, 1, e.Item.Width - 6, e.Item.Height - 2), 5))
+            using (var brush = new SolidBrush(Selection)) e.Graphics.FillPath(brush, path);
+            e.Graphics.SmoothingMode = smoothing;
+        }
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) { e.TextColor = e.Item.Enabled ? Theme.Text : Theme.Muted; base.OnRenderItemText(e); }
-        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { using (var pen = new Pen(Theme.Border)) e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1); }
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        { using (var pen = new Pen(Theme.Border)) e.Graphics.DrawLine(pen, 9, e.Item.Height / 2, e.Item.Width - 9, e.Item.Height / 2); }
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            var menu = e.ToolStrip as RoundedMenu; var smoothing = e.Graphics.SmoothingMode; e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(new RectangleF(.5f, .5f, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1), menu == null ? 8 : menu.CornerRadius))
+            using (var pen = new Pen(Theme.Border)) e.Graphics.DrawPath(pen, path);
+            e.Graphics.SmoothingMode = smoothing;
+        }
+    }
+    enum MenuGlyph { Open, Save, Record, Folder, Exit }
+    static class MenuIcons
+    {
+        public static Bitmap Draw(int size, MenuGlyph glyph)
+        {
+            var image = new Bitmap(size, size);
+            using (var g = Graphics.FromImage(image))
+            using (var pen = new Pen(glyph == MenuGlyph.Record ? Theme.Accent : Theme.Text, 1.4f))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias; g.ScaleTransform(size / 16f, size / 16f);
+                pen.StartCap = pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
+                switch (glyph)
+                {
+                    case MenuGlyph.Open:
+                        g.DrawRectangle(pen, 2.5f, 3, 11, 10); g.DrawLine(pen, 3, 6, 13, 6); break;
+                    case MenuGlyph.Save:
+                        g.DrawLines(pen, new[] { new PointF(3, 2), new PointF(11, 2), new PointF(14, 5), new PointF(14, 14), new PointF(2, 14), new PointF(2, 2), new PointF(3, 2) });
+                        g.DrawRectangle(pen, 5, 2, 5, 4); g.DrawRectangle(pen, 5, 9, 6, 5); break;
+                    case MenuGlyph.Record:
+                        g.DrawEllipse(pen, 2.5f, 2.5f, 11, 11); using (var brush = new SolidBrush(Theme.Accent)) g.FillEllipse(brush, 6, 6, 4, 4); break;
+                    case MenuGlyph.Folder:
+                        g.DrawLines(pen, new[] { new PointF(2, 13), new PointF(2, 3), new PointF(6, 3), new PointF(8, 5), new PointF(14, 5), new PointF(14, 13), new PointF(2, 13) }); break;
+                    case MenuGlyph.Exit:
+                        g.DrawLines(pen, new[] { new PointF(6, 2), new PointF(2, 2), new PointF(2, 14), new PointF(6, 14) });
+                        g.DrawLine(pen, 6, 8, 14, 8); g.DrawLines(pen, new[] { new PointF(11, 5), new PointF(14, 8), new PointF(11, 11) }); break;
+                }
+            }
+            return image;
+        }
     }
     enum TrayState { Idle, Recording, Saving, Error }
     static class AppIcons

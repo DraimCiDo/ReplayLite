@@ -11,9 +11,10 @@ namespace ReplayLite
     {
         readonly TextBox editor = new TextBox();
         int minimum, maximum = 100, value;
+        public event EventHandler ValueChanged;
         public int Minimum { get { return minimum; } set { minimum = value; Value = this.value; } }
         public int Maximum { get { return maximum; } set { maximum = value; Value = this.value; } }
-        public int Value { get { Commit(); return value; } set { this.value = Math.Max(minimum, Math.Min(maximum, value)); editor.Text = this.value.ToString(CultureInfo.InvariantCulture); Invalidate(); } }
+        public int Value { get { Commit(); return value; } set { int previous = this.value; this.value = Math.Max(minimum, Math.Min(maximum, value)); editor.Text = this.value.ToString(CultureInfo.InvariantCulture); Invalidate(); if (previous != this.value && ValueChanged != null) ValueChanged(this, EventArgs.Empty); } }
         public NumberBox()
         {
             Theme.Canvas(this); AccessibleRole = AccessibleRole.SpinButton; TabStop = false;
@@ -23,7 +24,7 @@ namespace ReplayLite
             editor.KeyPress += delegate(object sender, KeyPressEventArgs e) { if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar)) e.Handled = true; };
             editor.Leave += delegate { Commit(); Invalidate(); }; editor.Enter += delegate { Invalidate(); };
         }
-        void Commit() { int parsed; if (int.TryParse(editor.Text, out parsed)) value = Math.Max(minimum, Math.Min(maximum, parsed)); string text = value.ToString(CultureInfo.InvariantCulture); if (editor.Text != text) editor.Text = text; }
+        void Commit() { int previous = value, parsed; if (int.TryParse(editor.Text, out parsed)) value = Math.Max(minimum, Math.Min(maximum, parsed)); string text = value.ToString(CultureInfo.InvariantCulture); if (editor.Text != text) editor.Text = text; if (previous != value && ValueChanged != null) ValueChanged(this, EventArgs.Empty); }
         protected override void OnSizeChanged(EventArgs e) { editor.SetBounds(12, Math.Max(3, (Height - editor.PreferredHeight) / 2), Math.Max(20, Width - 50), editor.PreferredHeight); base.OnSizeChanged(e); }
         protected override void OnMouseDown(MouseEventArgs e) { if (Enabled && e.Button == MouseButtons.Left) { if (e.X >= Width - 33) Value = Value + (e.Y < Height / 2 ? 1 : -1); else editor.Focus(); } base.OnMouseDown(e); }
         protected override void OnMouseWheel(MouseEventArgs e) { if (ContainsFocus) Value = Value + Math.Sign(e.Delta); base.OnMouseWheel(e); }

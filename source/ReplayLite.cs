@@ -443,11 +443,11 @@ namespace ReplayLite
                     Application.Run(form); return exitCode;
                 }
             }
-            if (args.Length == 2 && args[0] == "--screenshot")
+            if (args.Length == 2 && (args[0] == "--screenshot" || args[0] == "--settings-screenshot"))
             {
                 using (var form = new MainForm())
                 {
-                    form.PreviewForDocs(); form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
+                    if (args[0] == "--settings-screenshot") form.PreviewSettingsForDocs(); else form.PreviewForDocs(); form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
                     using (var image = new Bitmap(form.Width, form.Height))
                     { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(args[1]); }
                 }
