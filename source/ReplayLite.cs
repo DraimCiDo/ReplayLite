@@ -434,6 +434,21 @@ namespace ReplayLite
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
+            if (args.Length == 2 && args[0] == "--startup-test")
+            {
+                Directory.CreateDirectory(args[1]);
+                using (var form = new MainForm(true, true))
+                {
+                    int exitCode = 1; var handle = form.Handle;
+                    form.BeginInvoke(new Action(async delegate
+                    {
+                        try { await form.VerifyBackgroundStartupAsync(args[1]); exitCode = 0; }
+                        catch (Exception error) { File.WriteAllText(Path.Combine(args[1], "startup-test.txt"), error.ToString()); }
+                        finally { Application.ExitThread(); }
+                    }));
+                    Application.Run(); return exitCode;
+                }
+            }
             if (args.Length == 2 && (args[0] == "--ui-test" || args[0] == "--ui-live-test"))
             {
                 using (var form = new MainForm(false, true))
@@ -457,7 +472,18 @@ namespace ReplayLite
             {
                 bool launchInTray = Array.IndexOf(args, "--startup") >= 0;
                 if (!SingletonCreated) { if (!launchInTray) MessageBox.Show("ReplayLite уже запущен. Открой его из трея."); return 0; }
-                Application.Run(new MainForm(launchInTray)); return 0;
+                using (var form = new MainForm(launchInTray))
+                {
+                    if (!launchInTray) Application.Run(form);
+                    else
+                    {
+                        form.FormClosed += delegate { Application.ExitThread(); };
+                        var handle = form.Handle;
+                        form.BeginInvoke(new Action(async delegate { await form.StartInBackgroundAsync(); }));
+                        Application.Run();
+                    }
+                }
+                return 0;
             }
         }
         static bool SingletonCreated;

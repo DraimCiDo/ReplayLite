@@ -20,6 +20,7 @@ namespace ReplayLite
         readonly ActionButton update = new ActionButton(); bool updating, monitorRefresh;
         readonly ToggleSwitch startup = new ToggleSwitch(); readonly Label startupInfo = new Label();
         readonly bool startInTray;
+        bool startupCanceled;
         readonly System.Threading.CancellationTokenSource updateCancel = new System.Threading.CancellationTokenSource();
         DateTime nextUpdateCheck = DateTime.MaxValue;
         bool checkingUpdates, updateDialogOpen, startupChanging, lastBalloonWasUpdate;
@@ -106,7 +107,7 @@ namespace ReplayLite
             foreach (var control in new Control[] { duration, display, sound, hotkey, fps, rate }) control.Height = 36;
             foreach (var control in new Control[] { sound, fps, rate }) control.Height = 34;
             startup.SetBounds(370, 211, 334, 32); startup.Font = new Font("Segoe UI", 9); startup.Text = "Запускать с Windows"; options.Controls.Add(startup);
-            startupInfo.SetBounds(370, 247, 334, 31); startupInfo.BackColor = Theme.Card; startupInfo.ForeColor = Theme.Muted; startupInfo.Font = new Font("Segoe UI", 8); startupInfo.Text = Settings.Portable ? "Запуск в трее. Для Portable\nне перемещайте папку программы." : "Запуск в трее после входа в Windows."; options.Controls.Add(startupInfo);
+            startupInfo.SetBounds(370, 247, 334, 31); startupInfo.BackColor = Theme.Card; startupInfo.ForeColor = Theme.Muted; startupInfo.Font = new Font("Segoe UI", 8); startupInfo.Text = Settings.Portable ? "Буфер включается автоматически.\nДля Portable не перемещайте папку." : "Запуск в трее с включённым буфером."; options.Controls.Add(startupInfo);
             if (!testing) try { startup.Checked = StartupRegistration.Enabled(Application.ExecutablePath); } catch (Exception error) { startup.Enabled = false; startupInfo.Text = "Не удалось прочитать автозапуск."; tips.SetToolTip(startupInfo, error.Message); }
             startup.CheckedChanged += delegate
             {
@@ -279,8 +280,9 @@ namespace ReplayLite
             catch (Exception e) { Native.UnregisterHotKey(Handle, 1); settings.Hotkey = previous; RegisterConfiguredHotkey(); hotkeyInfo.ForeColor = Theme.Red; hotkeyInfo.Text = "Не удалось сохранить: " + e.Message; return false; }
             hotkeyRegistered = true; hotkey.Binding = binding; hotkeyInfo.ForeColor = Theme.Muted; hotkeyInfo.Text = "Сочетание сохранено. Нажми поле, чтобы изменить его снова."; UpdateHotkeyLabels(); return true;
         }
-        async Task Toggle()
+        async Task Toggle(bool background = false)
         {
+            if (!background) startupCanceled = true;
             if (busy || closing) return;
             busy = true; SyncActions(); Exception error = null;
             try
@@ -296,8 +298,32 @@ namespace ReplayLite
                 }
             }
             catch (Exception e) { error = e; }
-            if (error != null) { if (recorder != null) await StopRecorder(); SetState("Не удалось начать запись", TrayState.Error); ShowError(error.Message); }
+            if (error != null) { if (recorder != null) await StopRecorder(); SetState("Не удалось начать запись", TrayState.Error); stateDetail.Text = error.Message; }
             busy = false; SyncActions();
+            if (error != null && !background) ShowError(error.Message);
+        }
+        internal async Task StartInBackgroundAsync(bool startCapture = true)
+        {
+            var handle = Handle; RegisterConfiguredHotkey();
+            if (startCapture)
+            {
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    if (attempt > 0)
+                    {
+                        try { await Task.Delay(3000, updateCancel.Token); } catch (OperationCanceledException) { return; }
+                    }
+                    if (closing || released || startupCanceled || recorder != null || busy) return;
+                    monitorRefresh = true;
+                    try { RefreshMonitors(); UpdateOptionsSummary(); }
+                    finally { monitorRefresh = false; }
+                    await Toggle(true);
+                    if (recorder != null && recorder.Running) break;
+                }
+                if (!closing && !released && recorder == null && !testing)
+                { lastBalloonWasUpdate = false; tray.ShowBalloonTip(5000, "Не удалось включить буфер ReplayLite", "Откройте ReplayLite из трея и проверьте экран, звук и папку записи.", ToolTipIcon.Warning); }
+            }
+            if (!testing && !closing && !released) await CheckForUpdates();
         }
         async Task StopRecorder()
         {
@@ -378,7 +404,7 @@ namespace ReplayLite
         }
         protected override void Dispose(bool disposing) { if (disposing) ReleaseUi(); base.Dispose(disposing); }
         protected override async void OnShown(EventArgs e)
-        { base.OnShown(e); RegisterConfiguredHotkey(); if (startInTray) Hide(); if (!testing) await CheckForUpdates(); }
+        { base.OnShown(e); RegisterConfiguredHotkey(); if (!testing && !startInTray) await CheckForUpdates(); }
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == 1) { if (!hotkey.IsCapturing) { var pending = SaveReplay(); } return; }
@@ -431,10 +457,15 @@ namespace ReplayLite
             VerifyStartupForTest(); report.AppendLine("STARTUP_REGISTRY_QUOTING_ENABLE_DISABLE_OWNERSHIP: PASS");
             using (var launch = new MainForm(true, true))
             {
-                launch.Show(); await Task.Delay(25);
-                if (launch.Visible || !launch.tray.Visible || launch.recorder != null) throw new Exception("Startup did not remain in the tray without capture.");
+                int shown = 0; launch.VisibleChanged += delegate { if (launch.Visible) shown++; };
+                await launch.StartInBackgroundAsync(false);
+                if (shown != 0 || launch.Visible || !launch.IsHandleCreated || !launch.tray.Visible) throw new Exception("Background initialization showed a window.");
+                launch.folder.Text = ""; await launch.StartInBackgroundAsync();
+                if (shown != 0 || launch.Visible || launch.busy || launch.recorder != null || launch.trayState != TrayState.Error) throw new Exception("Failed automatic capture showed a window or left startup busy.");
+                launch.Restore(); if (!launch.Visible) throw new Exception("Background window cannot be restored.");
             }
-            report.AppendLine("STARTUP_LAUNCH_HIDDEN_NO_CAPTURE: PASS");
+            report.AppendLine("STARTUP_INITIALIZATION_NO_VISIBLE_TRANSITIONS_AND_RESTORE: PASS");
+            report.AppendLine("STARTUP_FAILURE_RETRIES_STAY_HIDDEN: PASS");
             var newer = new ReleaseInfo { Version = new Version(99, 1, 2, 0) };
             if (!SetAvailableRelease(newer) || !trayUpdate.Available || !update.Text.Contains("99.1.2") || SetAvailableRelease(newer)) throw new Exception("Update notification missing or repeated.");
             var updateMenu = (RoundedMenu)tray.ContextMenuStrip; updateMenu.Show(this, new Point(30, 100)); await Task.Delay(25); VerifyMenuForTest(updateMenu, true, 6); updateMenu.Close();
@@ -605,6 +636,37 @@ namespace ReplayLite
                 hotkey.CancelCapture(); settings.Hotkey = original; RegisterConfiguredHotkey();
                 if (existed) File.WriteAllBytes(file, originalFile); else if (File.Exists(file)) File.Delete(file);
             }
+        }
+        internal async Task VerifyBackgroundStartupAsync(string root)
+        {
+            Directory.CreateDirectory(root); testing = true;
+            string settingsFile = Path.Combine(Settings.Home, "settings.txt");
+            bool existed = File.Exists(settingsFile); byte[] original = existed ? File.ReadAllBytes(settingsFile) : null;
+            int shown = 0; VisibleChanged += delegate { if (Visible) shown++; };
+            Exception failure = null; var report = new System.Text.StringBuilder();
+            try
+            {
+                folder.Text = Path.Combine(root, "replays");
+                await StartInBackgroundAsync();
+                if (shown != 0 || Visible || !tray.Visible) throw new Exception("Startup made the window visible.");
+                report.AppendLine("STARTUP_NEVER_SHOWS_WINDOW: PASS");
+                if (recorder == null || !recorder.Running || recorder.BufferedSeconds <= 0) throw new Exception("Automatic capture did not start: " + stateDetail.Text);
+                report.AppendLine("STARTUP_REAL_NVENC_BUFFER_AUTO_START: PASS");
+                int pid = recorder.ProcessId;
+                tray.ContextMenuStrip.Show(new Point(40, 40));
+                if (!traySave.Enabled || !trayToggle.Enabled) throw new Exception("Startup tray commands unavailable.");
+                tray.ContextMenuStrip.Close();
+                if (shown != 0) throw new Exception("Tray menu showed the main window.");
+                report.AppendLine("STARTUP_TRAY_SAVE_READY: PASS");
+                Restore();
+                if (!Visible || shown != 1 || recorder.ProcessId != pid || !recorder.Running) throw new Exception("Restoring the window interrupted automatic capture.");
+                report.AppendLine("STARTUP_RESTORE_PRESERVES_CAPTURE: PASS");
+            }
+            catch (Exception error) { failure = error; }
+            busy = true; if (recorder != null) await StopRecorder(); busy = false;
+            if (existed) File.WriteAllBytes(settingsFile, original); else if (File.Exists(settingsFile)) File.Delete(settingsFile);
+            if (failure != null) throw failure;
+            File.WriteAllText(Path.Combine(root, "startup-test.txt"), report.ToString(), new System.Text.UTF8Encoding(false));
         }
         internal async Task VerifyLiveUiAsync(string root)
         {
