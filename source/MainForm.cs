@@ -12,6 +12,8 @@ namespace ReplayLite
     {
         readonly Settings settings = Settings.Load();
         Recorder recorder;
+        string lastAudioSummary;
+        bool lastAudioDegraded;
         readonly SelectBox duration = new SelectBox(), fps = new SelectBox(), sound = new SelectBox(), display = new SelectBox();
         readonly NumberBox rate = new NumberBox();
         readonly HotkeyBox hotkey = new HotkeyBox(); readonly Label hotkeyInfo = new Label();
@@ -159,8 +161,9 @@ namespace ReplayLite
         }
         void UpdateOptionsSummary()
         {
-            videoSummary.Text = duration.Text + " · " + sound.Text + " · " + (fps.SelectedIndex == 1 ? "60" : "30") + " кадров/с · " + rate.Value + " Мбит/с";
-            tips.SetToolTip(videoSummary, display.Text + "\n" + videoSummary.Text); tips.SetToolTip(folder, folder.Text); tips.SetToolTip(openFolder, folder.Text);
+            bool active = recorder != null && recorder.Running;
+            videoSummary.Text = duration.Text + " · " + (active ? recorder.AudioSummary : sound.Text) + " · " + (fps.SelectedIndex == 1 ? "60" : "30") + " кадров/с · " + rate.Value + " Мбит/с";
+            tips.SetToolTip(videoSummary, display.Text + "\n" + videoSummary.Text + (active && recorder.AudioDegraded ? "\nВыбрано: " + sound.Text + ". Недоступные устройства подключатся автоматически." : "")); tips.SetToolTip(folder, folder.Text); tips.SetToolTip(openFolder, folder.Text);
             if (recorder == null) bufferValue.Text = "0:00 / " + ClockTime(SelectedSeconds);
             UpdateHotkeyLabels();
         }
@@ -221,6 +224,7 @@ namespace ReplayLite
             state.Text = text.StartsWith("Сохранено:") ? "Повтор сохранён" : text;
             stateDetail.Text = text.StartsWith("Сохранено:") ? text.Substring(10).Trim() + "\nЗапись продолжается. Новые кадры остаются для следующего повтора." : status == TrayState.Saving ? "Дождитесь завершения текущего действия." : status == TrayState.Recording ? "Сохраните нужный момент кнопкой или горячей клавишей.\nЗапись продолжается, даже если закрыть окно." : status == TrayState.Error ? "Проверьте экран, звук и папку сохранения.\nЗатем повторите запуск." : "Включите запись до нужного момента.\nЗатем сохраните уже записанный фрагмент.";
             if (text == "Накапливаем первые кадры…") stateDetail.Text = "Запись началась. Через несколько секунд\nпоявится возможность сохранить первый повтор.";
+            if (status == TrayState.Recording && recorder != null && recorder.AudioDegraded && !text.StartsWith("Сохранено:")) stateDetail.Text = "Звук: " + recorder.AudioSummary + ". Запись продолжается.\nНедоступные устройства подключатся автоматически.";
             if (status == TrayState.Idle && !SelectedMonitorSupported)
             { state.Text = "Выберите экран для записи"; stateDetail.Text = "В «Настройках» выберите монитор NVIDIA.\nСейчас выбранный экран недоступен для записи."; }
             badge.Set(status == TrayState.Recording ? "Идёт запись" : status == TrayState.Saving ? "Подождите…" : status == TrayState.Error ? "Ошибка" : "Не записывает", status == TrayState.Recording ? Theme.Accent : status == TrayState.Saving ? Theme.Blue : status == TrayState.Error ? Theme.Red : Theme.Muted);
@@ -298,7 +302,12 @@ namespace ReplayLite
                 }
             }
             catch (Exception e) { error = e; }
-            if (error != null) { if (recorder != null) await StopRecorder(); SetState("Не удалось начать запись", TrayState.Error); stateDetail.Text = error.Message; }
+            if (error != null)
+            {
+                try { if (recorder != null) await StopRecorder(); }
+                catch (Exception cleanupError) { error = new InvalidOperationException(error.Message + "\n" + cleanupError.Message, error); }
+                SetState("Не удалось начать запись", TrayState.Error); stateDetail.Text = error.Message;
+            }
             busy = false; SyncActions();
             if (error != null && !background) ShowError(error.Message);
         }
@@ -328,8 +337,12 @@ namespace ReplayLite
         async Task StopRecorder()
         {
             var current = recorder; if (current == null) return; save.Enabled = traySave.Enabled = false;
-            await current.StopAsync(); current.Dispose(); recorder = null; Inputs(true);
-            bufferReady = false; progress.Value = 0; bufferValue.Text = "0:00 / " + ClockTime(SelectedSeconds); diskValue.Text = "0 МБ"; cpuValue.Text = ramValue.Text = "—";
+            try { await current.StopAsync(); }
+            finally
+            {
+                current.Dispose(); recorder = null; Inputs(true); lastAudioSummary = null;
+                bufferReady = false; progress.Value = 0; bufferValue.Text = "0:00 / " + ClockTime(SelectedSeconds); diskValue.Text = "0 МБ"; cpuValue.Text = ramValue.Text = "—"; UpdateOptionsSummary();
+            }
         }
         async Task SaveReplay()
         {
@@ -345,7 +358,13 @@ namespace ReplayLite
             if (!testing && !closing && !released && DateTime.UtcNow >= nextUpdateCheck) { var pending = CheckForUpdates(); }
             if (recorder == null || busy || closing) return;
             if (recorder.Failure != null || !recorder.Running)
-            { busy = true; string message = recorder.Failure ?? ("Запись остановлена.\n" + recorder.ErrorLog); await StopRecorder(); SetState("Захват остановлен", TrayState.Error); ShowError(message); busy = false; SyncActions(); return; }
+            {
+                busy = true; string message = recorder.Failure ?? ("Запись остановлена.\n" + recorder.ErrorLog);
+                try { await StopRecorder(); }
+                catch (Exception error) { message += "\n" + error.Message; }
+                finally { busy = false; SetState("Захват остановлен", TrayState.Error); SyncActions(); }
+                ShowError(message); return;
+            }
             // Health monitoring stays active in the tray; hidden UI skips metrics and all painting.
             if (!Visible || WindowState == FormWindowState.Minimized) return;
             try
@@ -360,6 +379,9 @@ namespace ReplayLite
         void RefreshBufferMetrics()
         {
             if (recorder == null) return;
+            string currentAudio = recorder.AudioSummary; bool degraded = recorder.AudioDegraded;
+            if (currentAudio != lastAudioSummary || degraded != lastAudioDegraded)
+            { lastAudioSummary = currentAudio; lastAudioDegraded = degraded; UpdateOptionsSummary(); if (trayState == TrayState.Recording && !saving) SetState(state.Text, TrayState.Recording); }
             double seconds = recorder.BufferedSeconds;
             bufferValue.Text = ClockTime(seconds) + " / " + ClockTime(settings.Seconds); diskValue.Text = (recorder.DiskBytes / 1048576.0).ToString("0") + " МБ"; progress.Value = (float)(seconds / settings.Seconds); UpdateSaveAvailability(seconds);
             if (bufferReady && state.Text == "Накапливаем первые кадры…") SetState("Идёт фоновая запись", TrayState.Recording);
@@ -482,6 +504,7 @@ namespace ReplayLite
             hotkey.BeginCapture(); ShowSettings(false);
             if (hotkey.IsCapturing || hotkey.CaptureHookActive) throw new Exception("Page navigation kept keyboard capture active.");
             await VerifyReplayActionsForTest(); report.AppendLine("SYNTHETIC_UI_EMPTY_BUFFER_TRAY_SAVE_AND_REFILL: PASS");
+            report.AppendLine("CAPTURE_FAILURE_RELEASES_BUSY_AND_START_CONTROLS: PASS");
             start.PreviewHover(true); progress.Value = .65f; SetState("Буфер включён", TrayState.Recording);
             await WaitForAnimationsAsync();
             if (ActiveAnimations != 0 || trayState != TrayState.Recording) throw new Exception("Animation did not settle or recording tray state was lost.");
@@ -569,6 +592,9 @@ namespace ReplayLite
                 if (save.Enabled != (recorder.BufferedSeconds > 0)) throw new Exception("Save availability did not follow buffer reset.");
                 timeout.Restart(); while (recorder.BufferedSeconds <= 0 && timeout.ElapsedMilliseconds < 6000) await Task.Delay(100);
                 RefreshBufferMetrics(); if (!save.Enabled || !traySave.Enabled) throw new Exception("Saving did not become available after refill.");
+                recorder.Failure = "Synthetic capture failure"; bool reported = false;
+                try { await RefreshState(); } catch (InvalidOperationException error) { reported = error.Message.Contains("Synthetic capture failure"); }
+                if (!reported || busy || recorder != null || start.Enabled != SelectedMonitorSupported || !duration.Enabled || !browse.Enabled) throw new Exception("Capture failure left the start controls locked.");
             }
             catch (Exception error) { failure = error; }
             busy = true; await StopRecorder(); busy = false; lastReplay = null; openLast.Enabled = false; SetState("Готово к записи"); Deployment.Cleanup(root);
@@ -652,6 +678,11 @@ namespace ReplayLite
                 report.AppendLine("STARTUP_NEVER_SHOWS_WINDOW: PASS");
                 if (recorder == null || !recorder.Running || recorder.BufferedSeconds <= 0) throw new Exception("Automatic capture did not start: " + stateDetail.Text);
                 report.AppendLine("STARTUP_REAL_NVENC_BUFFER_AUTO_START: PASS");
+                report.AppendLine("STARTUP_AUDIO_MODE: " + recorder.AudioSummary);
+                var audioFlags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var activePipes = (List<AudioPipe>)typeof(Recorder).GetField("audio", audioFlags).GetValue(recorder);
+                int audioHooks = 0; foreach (var audioPipe in activePipes) if (typeof(AudioPipe).GetField("changes", audioFlags).GetValue(audioPipe) != null) audioHooks++;
+                report.AppendLine("STARTUP_AUDIO_NOTIFICATION_HOOKS: " + audioHooks);
                 int pid = recorder.ProcessId;
                 tray.ContextMenuStrip.Show(new Point(40, 40));
                 if (!traySave.Enabled || !trayToggle.Enabled) throw new Exception("Startup tray commands unavailable.");

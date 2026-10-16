@@ -11,9 +11,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using NAudio.CoreAudioApi;
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
 
 namespace ReplayLite
 {
@@ -73,34 +70,33 @@ namespace ReplayLite
     {
         public readonly string Name = "ReplayLite-" + Guid.NewGuid().ToString("N");
         public string InputPath { get { return @"\\.\pipe\" + Name; } }
-        readonly WasapiCapture capture;
-        readonly BufferedWaveProvider buffer;
-        readonly ISampleProvider samples;
         readonly NamedPipeServerStream pipe;
         readonly ManualResetEvent stop = new ManualResetEvent(false);
-        readonly ManualResetEvent stopped = new ManualResetEvent(false);
+        readonly Func<bool, IAudioSource> openSource;
+        readonly AudioDeviceChanges changes;
+        readonly int retryMilliseconds;
+        volatile IAudioSource source;
         Task pump;
         volatile bool disposed;
         long capturedBytes;
-        public long CapturedBytes { get { return Interlocked.Read(ref capturedBytes); } }
-        public string Failure;
+        public readonly bool SystemAudio;
+        public volatile bool Available;
+        public volatile string Warning, Failure;
+        public long CapturedBytes { get { var current = source; return Interlocked.Read(ref capturedBytes) + (current == null ? 0 : current.CapturedBytes); } }
 
-        public AudioPipe(bool system)
+        public AudioPipe(bool system) : this(system, s => new WasapiAudioSource(s), AudioDeviceChanges.TryCreate(system), 5000) { }
+        internal AudioPipe(bool system, Func<bool, IAudioSource> factory, AudioDeviceChanges notifications = null, int retryMs = 5000)
         {
-            try
-            {
-                capture = system ? new WasapiLoopbackCapture() : new WasapiCapture();
-                buffer = new BufferedWaveProvider(capture.WaveFormat) { BufferDuration = TimeSpan.FromMilliseconds(500), DiscardOnBufferOverflow = true, ReadFully = true };
-                ISampleProvider source = buffer.ToSampleProvider();
-                if (source.WaveFormat.Channels == 1) source = new MonoToStereoSampleProvider(source);
-                if (source.WaveFormat.Channels != 2) throw new NotSupportedException("Аудиоустройство должно быть настроено на стерео или моно (не 5.1/7.1).");
-                if (source.WaveFormat.SampleRate != 48000) source = new WdlResamplingSampleProvider(source, 48000);
-                samples = source;
-                pipe = new NamedPipeServerStream(Name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16384, 16384);
-                capture.DataAvailable += delegate(object sender, WaveInEventArgs e) { if (!disposed) { buffer.AddSamples(e.Buffer, 0, e.BytesRecorded); Interlocked.Add(ref capturedBytes, e.BytesRecorded); } };
-                capture.RecordingStopped += delegate(object sender, StoppedEventArgs e) { if (e.Exception != null) Failure = e.Exception.Message; stopped.Set(); };
-            }
-            catch { if (capture != null) capture.Dispose(); if (pipe != null) pipe.Dispose(); throw; }
+            SystemAudio = system; openSource = factory; changes = notifications; retryMilliseconds = retryMs;
+            try { pipe = new NamedPipeServerStream(Name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16384, 16384); }
+            catch { if (changes != null) changes.Dispose(); stop.Dispose(); throw; }
+        }
+        void DropSource()
+        {
+            Available = false; var previous = source; source = null;
+            if (previous == null) return;
+            Interlocked.Add(ref capturedBytes, previous.CapturedBytes);
+            try { previous.Dispose(); } catch (Exception) { }
         }
         public void Start()
         {
@@ -111,13 +107,27 @@ namespace ReplayLite
                 {
                     pipe.WaitForConnection();
                     if (stop.WaitOne(0)) return;
-                    capture.StartRecording();
                     var values = new float[1920]; var bytes = new byte[values.Length * 4];
-                    var clock = Stopwatch.StartNew(); long blocks = 0;
+                    var clock = Stopwatch.StartNew(); long blocks = 0, retryAt = 0; int deviceVersion = changes == null ? 0 : changes.Version;
                     while (!stop.WaitOne(0))
                     {
-                        // ReadFully inserts silence when loopback has no samples.
-                        samples.Read(values, 0, values.Length);
+                        long now = clock.ElapsedMilliseconds;
+                        if (changes != null && deviceVersion != changes.Version)
+                        { deviceVersion = changes.Version; DropSource(); retryAt = now; }
+                        if (source != null && source.Failure != null)
+                        { Warning = source.Failure; DropSource(); retryAt = now; }
+                        if (source == null && now >= retryAt)
+                        {
+                            retryAt = now + retryMilliseconds;
+                            try { source = openSource(SystemAudio); source.Start(); Warning = null; Available = true; }
+                            catch (Exception error) { Warning = error.Message; DropSource(); }
+                        }
+                        Array.Clear(values, 0, values.Length);
+                        if (source != null)
+                        {
+                            try { int read = source.Read(values); if (read < values.Length) Array.Clear(values, read, values.Length - read); }
+                            catch (Exception error) { Warning = error.Message; DropSource(); Array.Clear(values, 0, values.Length); retryAt = now + retryMilliseconds; }
+                        }
                         Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
                         pipe.Write(bytes, 0, bytes.Length);
                         blocks++;
@@ -127,17 +137,17 @@ namespace ReplayLite
                     }
                 }
                 catch (Exception e) { if (!disposed) Failure = e.Message; }
+                finally { DropSource(); }
             });
         }
         public void Dispose()
         {
             if (disposed) return; disposed = true; stop.Set();
-            try { capture.StopRecording(); } catch { }
             try { pipe.Dispose(); } catch { }
             if (pump != null) try { pump.Wait(2000); } catch { }
-            stopped.WaitOne(500);
-            capture.Dispose();
-            // Events stay alive until any late audio callback exits.
+            if (changes != null) changes.Dispose();
+            if (pump == null || pump.IsCompleted) stop.Dispose();
+            else pump.ContinueWith(delegate { stop.Dispose(); }, TaskScheduler.Default);
         }
     }
 
@@ -166,6 +176,15 @@ namespace ReplayLite
         public long DiskBytes { get { lock (gate) { return session == null || !Directory.Exists(session) ? 0 : Directory.GetFiles(session, "*.ts").Sum(p => new FileInfo(p).Length); } } }
         public int SegmentCount { get { lock (gate) { return session == null || !Directory.Exists(session) ? 0 : Directory.GetFiles(session, "s*.ts").Length; } } }
         public long[] AudioBytes { get { return audio.Select(a => a.CapturedBytes).ToArray(); } }
+        public bool AudioDegraded { get { return audio.Any(a => !a.Available); } }
+        public string AudioSummary
+        {
+            get
+            {
+                bool system = audio.Any(a => a.SystemAudio && a.Available), mic = audio.Any(a => !a.SystemAudio && a.Available);
+                return system && mic ? "Компьютер и микрофон" : system ? "Только звук компьютера" : mic ? "Только микрофон" : "Без звука";
+            }
+        }
         public double BufferedSeconds { get { lock (gate) { var a = ReadSegments(); return a.Count == 0 ? 0 : Math.Min(Config.Seconds, a.Last().End - a.First().Start); } } }
         public Recorder(Settings settings) { Config = settings; }
 
@@ -207,8 +226,8 @@ namespace ReplayLite
             try
             {
                 CheckSpace();
-                if (Config.Audio != "none") audio.Add(OpenAudio(true));
-                if (Config.Audio == "both") audio.Add(OpenAudio(false));
+                if (Config.Audio != "none") audio.Add(new AudioPipe(true));
+                if (Config.Audio == "both") audio.Add(new AudioPipe(false));
                 foreach (var a in audio) a.Start();
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture" };
                 foreach (var a in audio) args.AddRange(new[] { "-thread_queue_size", "32", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", a.InputPath });
@@ -256,14 +275,6 @@ namespace ReplayLite
             }
             catch (IOException) { }
             return result;
-        }
-        static AudioPipe OpenAudio(bool system)
-        {
-            try { return new AudioPipe(system); }
-            catch (Exception e)
-            {
-                throw new InvalidOperationException(system ? "Не удалось открыть звук компьютера. Проверь устройство вывода и стереоформат.\n" + e.Message : "Не удалось открыть микрофон. Проверь устройство ввода и разрешение для классических приложений в настройках конфиденциальности Windows.\n" + e.Message, e);
-            }
         }
         void CheckSpace()
         {
@@ -433,6 +444,7 @@ namespace ReplayLite
             Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
+            if (args.Length == 2 && args[0] == "--audio-test") return AudioRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
             if (args.Length == 2 && args[0] == "--startup-test")
             {

@@ -44,6 +44,8 @@ jobs:
         run: ./source/check-build.ps1
       - name: Check replay buffer reset without GPU
         run: ./source/check-buffer.ps1
+      - name: Check audio disconnect and recovery without devices
+        run: ./source/check-audio.ps1
       - name: Validate configured signing
         if: env.SIGNING_ENABLED == 'true'
         env:
