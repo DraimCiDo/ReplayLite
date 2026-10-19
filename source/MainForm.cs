@@ -14,6 +14,9 @@ namespace ReplayLite
         Recorder recorder;
         string lastAudioSummary;
         bool lastAudioDegraded;
+        bool recoveryPending;
+        int recoveryFailures;
+        DateTime nextRecovery;
         readonly SelectBox duration = new SelectBox(), fps = new SelectBox(), sound = new SelectBox(), display = new SelectBox();
         readonly NumberBox rate = new NumberBox();
         readonly HotkeyBox hotkey = new HotkeyBox(); readonly Label hotkeyInfo = new Label();
@@ -142,6 +145,7 @@ namespace ReplayLite
             Resize += delegate { if (WindowState == FormWindowState.Minimized) { hotkey.CancelCapture(); StopAnimations(); } };
             FormClosing += async delegate(object sender, FormClosingEventArgs e) { if (quitting) return; e.Cancel = true; if (e.CloseReason == CloseReason.WindowsShutDown) { await Quit(); return; } Hide(); };
             Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
+            Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged;
         }
 
         CardPanel Card(Control parent, int x, int y, int width, int height) { var card = new CardPanel(); card.SetBounds(x, y, width, height); parent.Controls.Add(card); return card; }
@@ -234,7 +238,7 @@ namespace ReplayLite
         }
         void SyncActions()
         {
-            bool active = recorder != null && recorder.Running;
+            bool active = recorder != null && (recorder.Running || recoveryPending);
             start.Enabled = !busy && !closing && (active || SelectedMonitorSupported); start.Text = active ? "Остановить запись" : "Начать запись";
             start.Fill = active ? Color.FromArgb(63, 39, 49) : Theme.Input; start.ForeColor = active ? Theme.Red : Theme.Text;
             UpdateSaveAvailability(bufferReady ? 1 : 0);
@@ -245,13 +249,13 @@ namespace ReplayLite
             UpdateHotkeyLabels();
         }
         void UpdateSaveAvailability(double seconds)
-        { bufferReady = seconds > 0; save.Enabled = recorder != null && recorder.Running && bufferReady && !busy && !saving && !closing; traySave.Enabled = save.Enabled; }
+        { bufferReady = seconds > 0; save.Enabled = recorder != null && recorder.Running && bufferReady && !recoveryPending && !busy && !saving && !closing; traySave.Enabled = save.Enabled; }
         void Restore() { Show(); WindowState = FormWindowState.Normal; Activate(); }
         void OpenFolder() { Directory.CreateDirectory(settings.Folder); Process.Start("explorer.exe", Recorder.Quote(settings.Folder)); }
         void Inputs(bool enabled) { foreach (var control in new Control[] { duration, fps, sound, rate, display, browse }) control.Enabled = enabled; settingsNote.ForeColor = Theme.Muted; settingsNote.Text = enabled ? "Изменения сохраняются автоматически" : "Для изменения остановите запись"; }
         void RefreshMonitors()
         {
-            string previous = display.SelectedIndex >= 0 && display.SelectedIndex < monitors.Count ? monitors[display.SelectedIndex].Id : settings.MonitorId;
+            string previous = recorder != null && !string.IsNullOrEmpty(recorder.Config.MonitorId) ? recorder.Config.MonitorId : display.SelectedIndex >= 0 && display.SelectedIndex < monitors.Count ? monitors[display.SelectedIndex].Id : settings.MonitorId;
             display.ClosePopup(); monitors = MonitorCatalog.Enumerate(); display.Items.Clear();
             foreach (var monitor in monitors) display.Items.Add(monitor);
             if (monitors.Count == 0) { display.Items.Add("Мониторы не обнаружены"); display.SelectedIndex = 0; return; }
@@ -304,6 +308,11 @@ namespace ReplayLite
             catch (Exception e) { error = e; }
             if (error != null)
             {
+                if (recorder != null && (CaptureRecovery.IsTransient(error.ToString() + recorder.ErrorLog) || error is TimeoutException))
+                { ScheduleRecovery(); error = null; }
+            }
+            if (error != null)
+            {
                 try { if (recorder != null) await StopRecorder(); }
                 catch (Exception cleanupError) { error = new InvalidOperationException(error.Message + "\n" + cleanupError.Message, error); }
                 SetState("Не удалось начать запись", TrayState.Error); stateDetail.Text = error.Message;
@@ -337,6 +346,7 @@ namespace ReplayLite
         async Task StopRecorder()
         {
             var current = recorder; if (current == null) return; save.Enabled = traySave.Enabled = false;
+            recoveryPending = false; recoveryFailures = 0;
             try { await current.StopAsync(); }
             finally
             {
@@ -347,6 +357,7 @@ namespace ReplayLite
         async Task SaveReplay()
         {
             if (recorder == null || busy || saving || closing) return;
+            if (recoveryPending || !recorder.Running) return;
             if (recorder.BufferedSeconds <= 0) { UpdateSaveAvailability(0); SetState("Накапливаем первые кадры…", TrayState.Recording); return; }
             saving = true; SetState("Сохраняю повтор…", TrayState.Saving);
             try { var output = await recorder.SaveAsync(); lastReplay = output; openLast.Enabled = true; RefreshBufferMetrics(); progress.FinishAnimation(); SetState("Сохранено: " + Path.GetFileName(output)); if (!testing) { lastBalloonWasUpdate = false; tray.ShowBalloonTip(3000, "Повтор сохранён", output, ToolTipIcon.Info); } }
@@ -357,9 +368,13 @@ namespace ReplayLite
         {
             if (!testing && !closing && !released && DateTime.UtcNow >= nextUpdateCheck) { var pending = CheckForUpdates(); }
             if (recorder == null || busy || closing) return;
+            if (recoveryPending)
+            { if (!saving && DateTime.UtcNow >= nextRecovery) await TryRecoverCapture(); return; }
             if (recorder.Failure != null || !recorder.Running)
             {
                 busy = true; string message = recorder.Failure ?? ("Запись остановлена.\n" + recorder.ErrorLog);
+                if (CaptureRecovery.IsTransient(message + recorder.ErrorLog))
+                { busy = false; ScheduleRecovery(); if (!saving) await TryRecoverCapture(); return; }
                 try { await StopRecorder(); }
                 catch (Exception error) { message += "\n" + error.Message; }
                 finally { busy = false; SetState("Захват остановлен", TrayState.Error); SyncActions(); }
@@ -376,6 +391,49 @@ namespace ReplayLite
             }
             catch (Exception e) { SetState("Ошибка состояния", TrayState.Error); stateDetail.Text = e.Message; }
         }
+        void ScheduleRecovery()
+        {
+            if (recorder == null || closing || released) return;
+            recoveryPending = true; nextRecovery = DateTime.UtcNow;
+            SetState("Ожидаем доступ к экрану…", TrayState.Saving);
+            stateDetail.Text = "Windows временно не отдаёт изображение.\nЗахват восстановится автоматически; запись можно остановить.";
+            UpdateSaveAvailability(0); SyncActions();
+        }
+        async Task TryRecoverCapture()
+        {
+            if (recorder == null || busy || saving || closing || !recoveryPending) return;
+            busy = true; SyncActions(); Exception fatal = null;
+            try
+            {
+                await recorder.RecoverAsync(updateCancel.Token);
+                if (!closing && !released)
+                {
+                    recoveryPending = false; recoveryFailures = 0;
+                    monitorRefresh = true;
+                    try { RefreshMonitors(); UpdateOptionsSummary(); } finally { monitorRefresh = false; }
+                    lastCpu = Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds + recorder.CpuSeconds; lastTime = clock.Elapsed.TotalSeconds;
+                    SetState("Запись восстановлена", TrayState.Recording); RefreshBufferMetrics();
+                    if (recorder.BufferResetOnRecovery) stateDetail.Text = "Формат экрана изменился — буфер начат заново.\nНовые кадры уже записываются.";
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error)
+            {
+                if (error is CaptureUnavailableException || error is TimeoutException || CaptureRecovery.IsTransient(error.ToString()))
+                {
+                    recoveryFailures++; nextRecovery = DateTime.UtcNow.AddSeconds(CaptureRecovery.RetrySeconds(recoveryFailures));
+                    if (!closing && !released) { SetState("Ожидаем доступ к экрану…", TrayState.Saving); stateDetail.Text = "Повторим запуск автоматически.\nПока экран недоступен, новые кадры не записываются."; }
+                }
+                else fatal = error;
+            }
+            if (fatal != null)
+            {
+                try { await StopRecorder(); } catch (Exception) { }
+                SetState("Не удалось восстановить запись", TrayState.Error);
+            }
+            busy = false; SyncActions();
+            if (fatal != null && !closing && !released) ShowError(fatal.Message);
+        }
         void RefreshBufferMetrics()
         {
             if (recorder == null) return;
@@ -387,11 +445,13 @@ namespace ReplayLite
             if (bufferReady && state.Text == "Накапливаем первые кадры…") SetState("Идёт фоновая запись", TrayState.Recording);
         }
         void PowerChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
-        { if (e.Mode == Microsoft.Win32.PowerModes.Resume && !IsDisposed) BeginInvoke(new Action(async delegate { if (recorder != null && !busy && !closing) { busy = true; try { await StopRecorder(); SetState("После сна включи буфер снова"); } finally { busy = false; SyncActions(); } } })); }
+        { if (e.Mode == Microsoft.Win32.PowerModes.Resume && !IsDisposed && IsHandleCreated) BeginInvoke(new Action(delegate { if (recorder != null) ScheduleRecovery(); })); }
+        void SessionChanged(object sender, Microsoft.Win32.SessionSwitchEventArgs e)
+        { if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock && IsHandleCreated && !released) BeginInvoke(new Action(delegate { if (recoveryPending) nextRecovery = DateTime.UtcNow; })); }
         void ShowError(string message) { if (testing) throw new InvalidOperationException(message); Restore(); MessageBox.Show(this, message, "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         async Task Quit()
         {
-            if (closing) return; closing = true; timer.Stop(); StopAnimations(); SyncActions();
+            if (closing) return; closing = true; updateCancel.Cancel(); timer.Stop(); StopAnimations(); SyncActions();
             while (busy) await Task.Delay(100);
             if (recorder != null) await StopRecorder();
             Native.UnregisterHotKey(Handle, 1); quitting = true; ReleaseUi(); Close();
@@ -413,13 +473,14 @@ namespace ReplayLite
         async Task RefreshDisplayAsync()
         {
             if (monitorRefresh) return; monitorRefresh = true;
-            try { while (busy && !closing && !released) await Task.Delay(100); if (released || closing) return; busy = true; try { if (recorder != null) { await StopRecorder(); SetState("Мониторы изменились — запустите запись снова"); } RefreshMonitors(); UpdateOptionsSummary(); } finally { busy = false; SyncActions(); } }
+            try { while (busy && !closing && !released) await Task.Delay(100); if (released || closing) return; RefreshMonitors(); UpdateOptionsSummary(); if (recorder != null) ScheduleRecovery(); }
             finally { monitorRefresh = false; }
         }
         void ReleaseUi()
         {
             if (released) return; released = true; updateCancel.Cancel(); updateCancel.Dispose(); timer.Stop(); timer.Dispose(); StopAnimations();
             Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
+            Microsoft.Win32.SystemEvents.SessionSwitch -= SessionChanged;
             if (IsHandleCreated) Native.UnregisterHotKey(Handle, 1);
             tray.Visible = false; var menu = tray.ContextMenuStrip; tray.Dispose(); if (menu != null) menu.Dispose(); tips.Dispose();
             Icon = null; foreach (var icon in icons) icon.Dispose(); brand.Dispose();
@@ -484,10 +545,14 @@ namespace ReplayLite
                 if (shown != 0 || launch.Visible || !launch.IsHandleCreated || !launch.tray.Visible) throw new Exception("Background initialization showed a window.");
                 launch.folder.Text = ""; await launch.StartInBackgroundAsync();
                 if (shown != 0 || launch.Visible || launch.busy || launch.recorder != null || launch.trayState != TrayState.Error) throw new Exception("Failed automatic capture showed a window or left startup busy.");
+                launch.recorder = new Recorder(new Settings()); launch.ScheduleRecovery();
+                if (!launch.start.Enabled || launch.save.Enabled || !launch.recoveryPending || launch.start.Text != "Остановить запись") throw new Exception("Recovery stop command unavailable.");
+                await launch.Toggle(); if (launch.recorder != null || launch.recoveryPending || launch.busy) throw new Exception("Manual stop did not cancel pending recovery.");
                 launch.Restore(); if (!launch.Visible) throw new Exception("Background window cannot be restored.");
             }
             report.AppendLine("STARTUP_INITIALIZATION_NO_VISIBLE_TRANSITIONS_AND_RESTORE: PASS");
             report.AppendLine("STARTUP_FAILURE_RETRIES_STAY_HIDDEN: PASS");
+            report.AppendLine("RECOVERY_PENDING_CAN_BE_STOPPED: PASS");
             var newer = new ReleaseInfo { Version = new Version(99, 1, 2, 0) };
             if (!SetAvailableRelease(newer) || !trayUpdate.Available || !update.Text.Contains("99.1.2") || SetAvailableRelease(newer)) throw new Exception("Update notification missing or repeated.");
             var updateMenu = (RoundedMenu)tray.ContextMenuStrip; updateMenu.Show(this, new Point(30, 100)); await Task.Delay(25); VerifyMenuForTest(updateMenu, true, 6); updateMenu.Close();
@@ -663,7 +728,7 @@ namespace ReplayLite
                 if (existed) File.WriteAllBytes(file, originalFile); else if (File.Exists(file)) File.Delete(file);
             }
         }
-        internal async Task VerifyBackgroundStartupAsync(string root)
+        internal async Task VerifyBackgroundStartupAsync(string root, bool checkRecovery = false)
         {
             Directory.CreateDirectory(root); testing = true;
             string settingsFile = Path.Combine(Settings.Home, "settings.txt");
@@ -689,6 +754,19 @@ namespace ReplayLite
                 tray.ContextMenuStrip.Close();
                 if (shown != 0) throw new Exception("Tray menu showed the main window.");
                 report.AppendLine("STARTUP_TRAY_SAVE_READY: PASS");
+                if (checkRecovery)
+                {
+                    busy = true;
+                    var capture = (Process)typeof(Recorder).GetField("process", audioFlags).GetValue(recorder);
+                    try { await capture.StandardInput.WriteLineAsync("q"); } catch (IOException) { }
+                    bool exited = await Task.Run(() => capture.WaitForExit(5000));
+                    if (!exited) throw new Exception("Live capture did not stop for recovery test.");
+                    capture.WaitForExit();
+                    typeof(Recorder).GetMethod("Log", audioFlags).Invoke(recorder, new object[] { "[Parsed_ddagrab_0] AcquireNextFrame failed: 887a0026" });
+                    busy = false; await RefreshState();
+                    if (recorder == null || !recorder.Running || recoveryPending || recorder.ProcessId == pid || recorder.BufferResetOnRecovery || shown != 0) throw new Exception("Live NVENC recovery failed or showed a window.");
+                    pid = recorder.ProcessId; report.AppendLine("LIVE_DXGI_RECOVERY_NEW_PROCESS_OLD_BUFFER_HIDDEN_WINDOW: PASS");
+                }
                 Restore();
                 if (!Visible || shown != 1 || recorder.ProcessId != pid || !recorder.Running) throw new Exception("Restoring the window interrupted automatic capture.");
                 report.AppendLine("STARTUP_RESTORE_PRESERVES_CAPTURE: PASS");

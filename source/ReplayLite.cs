@@ -167,6 +167,14 @@ namespace ReplayLite
         System.Threading.Timer cleaner;
         string session;
         string savedLastSegment;
+        readonly List<Segment> retainedSegments = new List<Segment>();
+        readonly Func<List<string>, string, Action<string>, Process> captureLauncher;
+        int nextSegmentNumber;
+        double timestampOffset;
+        volatile bool recovering;
+        string retainedVideoFormat;
+        int retainedRotation;
+        public bool BufferResetOnRecovery { get; private set; }
         volatile bool stopping;
         public string Failure;
         public int ProcessId { get { return process == null ? 0 : process.Id; } }
@@ -187,6 +195,7 @@ namespace ReplayLite
         }
         public double BufferedSeconds { get { lock (gate) { var a = ReadSegments(); return a.Count == 0 ? 0 : Math.Min(Config.Seconds, a.Last().End - a.First().Start); } } }
         public Recorder(Settings settings) { Config = settings; }
+        internal Recorder(Settings settings, Func<List<string>, string, Action<string>, Process> launcher) { Config = settings; captureLauncher = launcher; }
 
         public static string Quote(string value)
         {
@@ -222,10 +231,20 @@ namespace ReplayLite
             session = Path.Combine(Settings.Home, "buffer-" + Guid.NewGuid().ToString("N"));
             savedLastSegment = null;
             Directory.CreateDirectory(session);
+            recovering = true;
+            Exception startupError = null;
+            try { await StartPipelineAsync(CancellationToken.None); recovering = false; }
+            catch (Exception error) { startupError = error; }
+            if (startupError == null) return;
+            if (!CaptureRecovery.IsTransient(startupError.ToString() + ErrorLog) && !(startupError is TimeoutException)) await StopAsync();
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startupError).Throw();
+        }
+        async Task StartPipelineAsync(CancellationToken token)
+        {
             Exception startupError = null;
             try
             {
-                CheckSpace();
+                Failure = null; lock (logGate) errors.Clear(); CheckSpace();
                 if (Config.Audio != "none") audio.Add(new AudioPipe(true));
                 if (Config.Audio == "both") audio.Add(new AudioPipe(false));
                 foreach (var a in audio) a.Start();
@@ -237,24 +256,35 @@ namespace ReplayLite
                 if (audio.Count == 2) args.AddRange(new[] { "-map", "[a]" });
                 else if (audio.Count == 1) args.AddRange(new[] { "-map", "0:a" });
                 if (audio.Count > 0) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k", "-threads:a", "1" });
-                args.AddRange(new[] { "-f", "segment", "-segment_format", "mpegts", "-segment_time", "2", "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d.ts" });
-                process = Launch(ffmpeg, args, session, Log);
+                args.AddRange(new[] { "-f", "segment", "-segment_format", "mpegts", "-segment_time", "2", "-segment_start_number", nextSegmentNumber.ToString(CultureInfo.InvariantCulture), "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d.ts" });
+                process = captureLauncher == null ? Launch(ffmpeg, args, session, Log) : captureLauncher(args, session, Log);
                 try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
-                cleaner = new System.Threading.Timer(delegate { Maintain(); }, null, 1000, 1000);
+                if (cleaner == null) cleaner = new System.Threading.Timer(delegate { Maintain(); }, null, 1000, 1000);
                 for (int i = 0; i < 160; i++)
                 {
-                    await Task.Delay(100);
+                    await Task.Delay(100, token);
                     if (Failure != null) throw new Exception(Failure);
                     if (process.HasExited) throw new Exception("Захват не запущен. Проверь экран и драйвер NVIDIA.\n" + ErrorLog);
-                    if (BufferedSeconds > 0) return;
+                    lock (gate) { if (ReadCurrentSegments().Count > 0) return; }
                 }
                 throw new TimeoutException("За 16 секунд не появился видеобуфер.\n" + ErrorLog);
             }
             catch (Exception e) { startupError = e; }
-            await StopAsync();
+            await StopPipelineAsync();
+            if (!(startupError is OperationCanceledException))
+            {
+                string diagnostic = startupError.Message + "\n" + ErrorLog;
+                if (startupError is TimeoutException) throw new TimeoutException(diagnostic, startupError);
+                throw new IOException(diagnostic, startupError);
+            }
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startupError).Throw();
         }
         List<Segment> ReadSegments()
+        {
+            var result = retainedSegments.Where(s => (savedLastSegment == null || string.CompareOrdinal(s.Name, savedLastSegment) > 0) && session != null && File.Exists(Path.Combine(session, s.Name))).ToList();
+            result.AddRange(ReadCurrentSegments()); return result;
+        }
+        List<Segment> ReadCurrentSegments()
         {
             var result = new List<Segment>();
             if (session == null) return result;
@@ -269,7 +299,7 @@ namespace ReplayLite
                         var p = line.Split(','); double start, end;
                         if (p.Length != 3 || !double.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out start) || !double.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out end)) continue;
                         var name = p[0].Trim('"');
-                        if ((savedLastSegment == null || string.CompareOrdinal(name, savedLastSegment) > 0) && Path.GetFileName(name) == name && name.StartsWith("s") && name.EndsWith(".ts") && File.Exists(Path.Combine(session, name))) result.Add(new Segment { Name = name, Start = start, End = end });
+                        if (end > start && (savedLastSegment == null || string.CompareOrdinal(name, savedLastSegment) > 0) && Path.GetFileName(name) == name && name.StartsWith("s") && name.EndsWith(".ts") && File.Exists(Path.Combine(session, name))) result.Add(new Segment { Name = name, Start = start + timestampOffset, End = end + timestampOffset });
                     }
                 }
             }
@@ -284,16 +314,17 @@ namespace ReplayLite
         }
         void Maintain()
         {
-            if (stopping) return;
+            if (stopping || recovering) return;
             try
             {
-                if (process.HasExited) { Failure = "FFmpeg остановился.\n" + ErrorLog; return; }
-                foreach (var a in audio) if (a.Failure != null) { Failure = "Ошибка аудиоустройства: " + a.Failure; return; }
                 lock (gate)
                 {
-                    if (stopping) return;
+                    if (stopping || recovering || process == null) return;
+                    if (process.HasExited) { Failure = "FFmpeg остановился.\n" + ErrorLog; return; }
+                    foreach (var a in audio) if (a.Failure != null) { Failure = "Ошибка аудиоустройства: " + a.Failure; return; }
                     var all = Directory.GetFiles(session, "s*.ts").OrderBy(p => p, StringComparer.Ordinal).ToArray();
                     int keep = Config.Seconds / 2 + 5;
+                    retainedSegments.RemoveAll(s => (savedLastSegment != null && string.CompareOrdinal(s.Name, savedLastSegment) <= 0) || !File.Exists(Path.Combine(session, s.Name)));
                     for (int i = 0; i < all.Length; i++)
                     {
                         bool consumed = savedLastSegment != null && string.CompareOrdinal(Path.GetFileName(all[i]), savedLastSegment) <= 0;
@@ -303,7 +334,7 @@ namespace ReplayLite
                     if (new DriveInfo(Path.GetPathRoot(session)).AvailableFreeSpace < 128 * 1024 * 1024) Failure = "На диске осталось менее 128 МБ; запись остановлена.";
                 }
             }
-            catch (Exception e) { if (!stopping) Failure = "Ошибка буфера: " + e.Message; }
+            catch (Exception e) { if (!stopping && !recovering) Failure = "Ошибка буфера: " + e.Message; }
         }
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern bool CreateHardLink(string newFile, string existingFile, IntPtr security);
@@ -377,10 +408,73 @@ namespace ReplayLite
                 saver.Release();
             }
         }
-        public async Task StopAsync()
+        internal async Task RecoverAsync(CancellationToken token)
         {
-            stopping = true;
-            if (cleaner != null) { cleaner.Dispose(); cleaner = null; }
+            if (stopping || session == null) throw new InvalidOperationException("Буфер остановлен.");
+            await saver.WaitAsync(token);
+            try
+            {
+                lock (gate) { if (!recovering) BufferResetOnRecovery = false; recovering = true; }
+                await StopPipelineAsync(); token.ThrowIfCancellationRequested();
+                lock (gate)
+                {
+                    var completed = ReadSegments();
+                    retainedSegments.Clear(); retainedSegments.AddRange(completed);
+                    timestampOffset = completed.Count == 0 ? 0 : completed.Last().End;
+                    foreach (var path in Directory.GetFiles(session, "s*.ts"))
+                    {
+                        string name = Path.GetFileNameWithoutExtension(path); int number;
+                        if (int.TryParse(name.Substring(1), out number)) nextSegmentNumber = Math.Max(nextSegmentNumber, number + 1);
+                        if (!completed.Any(s => s.Name == Path.GetFileName(path))) TryDeleteConsumed(path);
+                    }
+                    string csv = Path.Combine(session, "segments.csv"); if (File.Exists(csv)) File.Delete(csv);
+                }
+                if (retainedSegments.Count > 0 && retainedVideoFormat == null)
+                {
+                    retainedRotation = Config.Rotation;
+                    try { retainedVideoFormat = await ProbeVideoFormatAsync(Path.Combine(session, retainedSegments[0].Name)); }
+                    catch (Exception) { DiscardRetainedSegments(); }
+                }
+                if (captureLauncher == null)
+                {
+                    var monitor = MonitorCatalog.Enumerate().FirstOrDefault(m => m.CanCapture && (!string.IsNullOrEmpty(Config.MonitorId) ? string.Equals(m.Id, Config.MonitorId, StringComparison.OrdinalIgnoreCase) : m.Adapter == Config.DisplayAdapter && m.Output == Config.Display));
+                    if (monitor == null) throw new CaptureUnavailableException("Выбранный монитор временно недоступен.");
+                    Config.DisplayAdapter = monitor.Adapter; Config.Display = monitor.Output; Config.Rotation = monitor.Rotation;
+                }
+                await StartPipelineAsync(token);
+                if (retainedSegments.Count > 0)
+                {
+                    string currentFormat = null;
+                    try { string first; lock (gate) first = ReadCurrentSegments()[0].Name; currentFormat = await ProbeVideoFormatAsync(Path.Combine(session, first)); }
+                    catch (Exception) { }
+                    if (currentFormat != retainedVideoFormat || retainedRotation != Config.Rotation) DiscardRetainedSegments();
+                }
+                retainedVideoFormat = null; Failure = null; recovering = false;
+            }
+            finally { saver.Release(); }
+        }
+        void DiscardRetainedSegments()
+        {
+            lock (gate)
+            {
+                foreach (var segment in retainedSegments) TryDeleteConsumed(Path.Combine(session, segment.Name));
+                retainedSegments.Clear(); retainedVideoFormat = null; BufferResetOnRecovery = true;
+            }
+        }
+        async Task<string> ProbeVideoFormatAsync(string path)
+        {
+            using (var probe = new Process { StartInfo = new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffprobe.exe"), "-v error -select_streams v:0 -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 " + Quote(path)) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } })
+            {
+                probe.Start(); Native.ProtectChild(probe); var output = probe.StandardOutput.ReadToEndAsync(); var error = probe.StandardError.ReadToEndAsync();
+                bool exited = await Task.Run(() => probe.WaitForExit(5000));
+                if (!exited) { try { probe.Kill(); } catch { } throw new TimeoutException("Не удалось проверить формат видеобуфера."); }
+                probe.WaitForExit(); string result = (await output).Trim(); string diagnostic = await error;
+                if (probe.ExitCode != 0 || result.Length == 0) throw new IOException("Не удалось прочитать видеобуфер. " + diagnostic);
+                return result;
+            }
+        }
+        async Task StopPipelineAsync()
+        {
             if (process != null && !process.HasExited)
             {
                 try { await process.StandardInput.WriteLineAsync("q"); } catch { }
@@ -388,9 +482,16 @@ namespace ReplayLite
                 if (!exited) { try { process.Kill(); } catch { } await Task.Run(() => process.WaitForExit(2500)); }
             }
             foreach (var a in audio) a.Dispose(); audio.Clear();
+            if (process != null) { if (process.HasExited) await Task.Run(() => process.WaitForExit()); process.Dispose(); process = null; }
+        }
+        public async Task StopAsync()
+        {
+            stopping = true;
+            if (cleaner != null) { cleaner.Dispose(); cleaner = null; }
+            await StopPipelineAsync();
             // Await snapshots before deleting this session. Other instances' sessions are never touched.
             await saver.WaitAsync();
-            try { lock (gate) { if (session != null && Directory.Exists(session)) Directory.Delete(session, true); session = null; } }
+            try { lock (gate) { if (session != null && Directory.Exists(session)) Directory.Delete(session, true); session = null; retainedSegments.Clear(); } }
             catch (IOException) { }
             finally { saver.Release(); }
         }
@@ -445,8 +546,9 @@ namespace ReplayLite
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--audio-test") return AudioRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
+            if (args.Length == 2 && args[0] == "--capture-recovery-test") return CaptureRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
-            if (args.Length == 2 && args[0] == "--startup-test")
+            if (args.Length == 2 && (args[0] == "--startup-test" || args[0] == "--capture-recovery-live-test"))
             {
                 Directory.CreateDirectory(args[1]);
                 using (var form = new MainForm(true, true))
@@ -454,7 +556,7 @@ namespace ReplayLite
                     int exitCode = 1; var handle = form.Handle;
                     form.BeginInvoke(new Action(async delegate
                     {
-                        try { await form.VerifyBackgroundStartupAsync(args[1]); exitCode = 0; }
+                        try { await form.VerifyBackgroundStartupAsync(args[1], args[0] == "--capture-recovery-live-test"); exitCode = 0; }
                         catch (Exception error) { File.WriteAllText(Path.Combine(args[1], "startup-test.txt"), error.ToString()); }
                         finally { Application.ExitThread(); }
                     }));

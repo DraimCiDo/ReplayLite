@@ -46,6 +46,8 @@ jobs:
         run: ./source/check-buffer.ps1
       - name: Check audio disconnect and recovery without devices
         run: ./source/check-audio.ps1
+      - name: Check desktop capture recovery without GPU
+        run: ./source/check-capture-recovery.ps1
       - name: Validate configured signing
         if: env.SIGNING_ENABLED == 'true'
         env:
