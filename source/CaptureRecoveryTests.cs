@@ -17,9 +17,10 @@ namespace ReplayLite
         sealed class Capture
         {
             internal int Failures, Width = 64;
-            internal bool PermanentFailure, EndSessionOnLaunch;
+            internal bool PermanentFailure, EndSessionOnLaunch, CancelStart;
             internal Process Launch(List<string> production, string session, Action<string> log)
             {
+                if (CancelStart) { Native.SetSessionEnding(false); throw new OperationCanceledException("Windows завершает сеанс."); }
                 if (Failures > 0) { Failures--; throw new IOException("[Parsed_ddagrab_0] DuplicateOutput failed: 80070005"); }
                 if (PermanentFailure) throw new IOException("Недостаточно места для буфера");
                 int output = production.FindLastIndex(s => s == "-f");
@@ -126,15 +127,18 @@ namespace ReplayLite
                     capture.PermanentFailure = true; bool permanent = false;
                     try { await recorder.RecoverAsync(CancellationToken.None); } catch (IOException error) { permanent = !CaptureRecovery.IsTransient(error.ToString()); }
                     Assert(permanent, "Stale DXGI log hides permanent failure"); report.AppendLine("PERMANENT_FAILURE_NOT_HIDDEN_BY_OLD_DXGI_LOG: PASS");
-                    var starting = new Capture { EndSessionOnLaunch = true };
-                    using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, starting.Launch))
+                    foreach (bool alreadyCanceled in new[] { false, true })
                     {
-                        bool interrupted = false;
-                        try { await startup.StartAsync(); } catch (OperationCanceledException) { interrupted = true; }
-                        finally { Native.SetSessionEnding(false); }
-                        Assert(interrupted && Directory.Exists(Session(startup)), "Shutdown interruption destroyed startup session");
-                        starting.EndSessionOnLaunch = false; await startup.RecoverAsync(CancellationToken.None);
-                        Assert(startup.Running, "Canceled shutdown could not recover interrupted startup"); await startup.StopAsync();
+                        var starting = new Capture { EndSessionOnLaunch = !alreadyCanceled, CancelStart = alreadyCanceled };
+                        using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, starting.Launch))
+                        {
+                            bool interrupted = false;
+                            try { await startup.StartAsync(); } catch (OperationCanceledException) { interrupted = true; }
+                            finally { Native.SetSessionEnding(false); }
+                            Assert(interrupted && Directory.Exists(Session(startup)), "Shutdown interruption destroyed startup session");
+                            starting.EndSessionOnLaunch = starting.CancelStart = false; await startup.RecoverAsync(CancellationToken.None);
+                            Assert(startup.Running, "Canceled shutdown could not recover interrupted startup"); await startup.StopAsync();
+                        }
                     }
                     report.AppendLine("CANCELED_SHUTDOWN_RECOVERS_INTERRUPTED_INITIAL_START: PASS"); exit = 0;
                 }

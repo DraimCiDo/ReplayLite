@@ -307,6 +307,8 @@ namespace ReplayLite
                 }
             }
             catch (Exception e) { error = e; }
+            if (error is OperationCanceledException && recorder != null && !closing)
+            { if (Native.SessionEnding) recoveryPending = true; else ScheduleRecovery(); error = null; }
             if (error != null && Native.SessionEnding) { recoveryPending = recorder != null; error = null; }
             if (error != null)
             {

@@ -236,7 +236,7 @@ namespace ReplayLite
             try { await StartPipelineAsync(CancellationToken.None); recovering = false; }
             catch (Exception error) { startupError = error; }
             if (startupError == null) return;
-            if (!(startupError is OperationCanceledException && Native.SessionEnding) && !CaptureRecovery.IsTransient(startupError.ToString() + ErrorLog) && !(startupError is TimeoutException)) await StopAsync();
+            if (!(startupError is OperationCanceledException) && !CaptureRecovery.IsTransient(startupError.ToString() + ErrorLog) && !(startupError is TimeoutException)) await StopAsync();
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startupError).Throw();
         }
         async Task StartPipelineAsync(CancellationToken token)
