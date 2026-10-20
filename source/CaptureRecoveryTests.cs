@@ -17,7 +17,7 @@ namespace ReplayLite
         sealed class Capture
         {
             internal int Failures, Width = 64;
-            internal bool PermanentFailure;
+            internal bool PermanentFailure, EndSessionOnLaunch;
             internal Process Launch(List<string> production, string session, Action<string> log)
             {
                 if (Failures > 0) { Failures--; throw new IOException("[Parsed_ddagrab_0] DuplicateOutput failed: 80070005"); }
@@ -25,7 +25,9 @@ namespace ReplayLite
                 int output = production.FindLastIndex(s => s == "-f");
                 var args = new List<string> { "-v", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=" + Width + "x64:rate=5", "-an", "-c:v", "libx264", "-preset", "ultrafast", "-g", "10", "-bf", "0" };
                 args.AddRange(production.Skip(output));
-                return Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), args, session, log);
+                var process = Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), args, session, log);
+                if (EndSessionOnLaunch) Native.SetSessionEnding(true);
+                return process;
             }
         }
         static List<Segment> Segments(Recorder recorder)
@@ -50,6 +52,24 @@ namespace ReplayLite
                 process.WaitForExit(); Assert(process.ExitCode == 0 && errors.Length == 0, "Recovered clip failed decoding: " + errors);
             }
         }
+        static async Task InterruptProbe(Recorder recorder)
+        {
+            string name = "replaylite-probe-test-" + Guid.NewGuid().ToString("N");
+            using (var cancel = new CancellationTokenSource())
+            using (var pipe = new System.IO.Pipes.NamedPipeServerStream(name, System.IO.Pipes.PipeDirection.Out, 1, System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous))
+            {
+                try
+                {
+                    var connected = pipe.WaitForConnectionAsync();
+                    var probe = (Task<string>)typeof(Recorder).GetMethod("ProbeVideoFormatAsync", Private).Invoke(recorder, new object[] { @"\\.\pipe\" + name, cancel.Token });
+                    Assert(await Task.WhenAny(connected, Task.Delay(4000)) == connected, "Probe did not connect to fixture"); await connected;
+                    Native.SetSessionEnding(true); bool canceled = false;
+                    try { await probe; } catch (OperationCanceledException) { canceled = true; }
+                    Assert(canceled, "In-flight ffprobe ignored session shutdown");
+                }
+                finally { cancel.Cancel(); Native.SetSessionEnding(false); }
+            }
+        }
         internal static async Task<int> Run(string root)
         {
             Directory.CreateDirectory(root); var report = new StringBuilder(); var capture = new Capture(); int exit = 1;
@@ -64,6 +84,18 @@ namespace ReplayLite
                     var old = Segments(recorder); Assert(old.Count > 0, "No retained fixture frames");
                     var hashes = old.ToDictionary(s => s.Name, s => Hash(Path.Combine(Session(recorder), s.Name)));
                     int oldPid = recorder.ProcessId; double before = recorder.BufferedSeconds;
+                    Native.SetSessionEnding(true);
+                    try
+                    {
+                        bool blockedProbe = false, blockedCapture = false, blockedRecovery = false;
+                        try { await (Task<string>)typeof(Recorder).GetMethod("ProbeVideoFormatAsync", Private).Invoke(recorder, new object[] { Path.Combine(Session(recorder), old[0].Name), CancellationToken.None }); } catch (OperationCanceledException) { blockedProbe = true; }
+                        try { using (var child = Recorder.Launch("does-not-exist.exe", new string[0], root, null)) { } } catch (OperationCanceledException) { blockedCapture = true; }
+                        try { await recorder.RecoverAsync(CancellationToken.None); } catch (OperationCanceledException) { blockedRecovery = true; }
+                        Assert(blockedProbe && blockedCapture && blockedRecovery && recorder.BufferedSeconds >= before - .05, "Shutdown launched media or discarded buffer");
+                    }
+                    finally { Native.SetSessionEnding(false); }
+                    report.AppendLine("SHUTDOWN_BLOCKS_FFPROBE_CAPTURE_AND_RECOVERY_PRESERVES_BUFFER: PASS");
+                    await InterruptProbe(recorder); report.AppendLine("SHUTDOWN_INTERRUPTS_RUNNING_FFPROBE: PASS");
                     capture.Failures = 2;
                     for (int i = 0; i < 2; i++)
                     {
@@ -93,7 +125,18 @@ namespace ReplayLite
                     Assert(canceled, "Recovery ignores cancellation"); report.AppendLine("RECOVERY_CANCELLATION: PASS");
                     capture.PermanentFailure = true; bool permanent = false;
                     try { await recorder.RecoverAsync(CancellationToken.None); } catch (IOException error) { permanent = !CaptureRecovery.IsTransient(error.ToString()); }
-                    Assert(permanent, "Stale DXGI log hides permanent failure"); report.AppendLine("PERMANENT_FAILURE_NOT_HIDDEN_BY_OLD_DXGI_LOG: PASS"); exit = 0;
+                    Assert(permanent, "Stale DXGI log hides permanent failure"); report.AppendLine("PERMANENT_FAILURE_NOT_HIDDEN_BY_OLD_DXGI_LOG: PASS");
+                    var starting = new Capture { EndSessionOnLaunch = true };
+                    using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, starting.Launch))
+                    {
+                        bool interrupted = false;
+                        try { await startup.StartAsync(); } catch (OperationCanceledException) { interrupted = true; }
+                        finally { Native.SetSessionEnding(false); }
+                        Assert(interrupted && Directory.Exists(Session(startup)), "Shutdown interruption destroyed startup session");
+                        starting.EndSessionOnLaunch = false; await startup.RecoverAsync(CancellationToken.None);
+                        Assert(startup.Running, "Canceled shutdown could not recover interrupted startup"); await startup.StopAsync();
+                    }
+                    report.AppendLine("CANCELED_SHUTDOWN_RECOVERS_INTERRUPTED_INITIAL_START: PASS"); exit = 0;
                 }
                 catch (Exception error) { report.AppendLine("FAIL: " + error); report.AppendLine(recorder.ErrorLog); }
                 await recorder.StopAsync(); Assert(!recorder.Running, "Recovery recorder did not stop");

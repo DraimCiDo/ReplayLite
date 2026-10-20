@@ -215,7 +215,7 @@ namespace ReplayLite
             var p = new Process { StartInfo = new ProcessStartInfo(file, string.Join(" ", args.Select(Quote))) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true, RedirectStandardOutput = true, WorkingDirectory = cwd } };
             p.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null && log != null) log(e.Data); };
             p.OutputDataReceived += delegate { };
-            p.Start();
+            Native.ThrowIfSessionEnding(); p.Start();
             try { Native.ProtectChild(p); }
             catch { try { p.Kill(); } catch { } p.Dispose(); throw; }
             p.BeginErrorReadLine(); p.BeginOutputReadLine();
@@ -236,7 +236,7 @@ namespace ReplayLite
             try { await StartPipelineAsync(CancellationToken.None); recovering = false; }
             catch (Exception error) { startupError = error; }
             if (startupError == null) return;
-            if (!CaptureRecovery.IsTransient(startupError.ToString() + ErrorLog) && !(startupError is TimeoutException)) await StopAsync();
+            if (!(startupError is OperationCanceledException && Native.SessionEnding) && !CaptureRecovery.IsTransient(startupError.ToString() + ErrorLog) && !(startupError is TimeoutException)) await StopAsync();
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startupError).Throw();
         }
         async Task StartPipelineAsync(CancellationToken token)
@@ -244,6 +244,7 @@ namespace ReplayLite
             Exception startupError = null;
             try
             {
+                token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
                 Failure = null; lock (logGate) errors.Clear(); CheckSpace();
                 if (Config.Audio != "none") audio.Add(new AudioPipe(true));
                 if (Config.Audio == "both") audio.Add(new AudioPipe(false));
@@ -257,12 +258,14 @@ namespace ReplayLite
                 else if (audio.Count == 1) args.AddRange(new[] { "-map", "0:a" });
                 if (audio.Count > 0) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k", "-threads:a", "1" });
                 args.AddRange(new[] { "-f", "segment", "-segment_format", "mpegts", "-segment_time", "2", "-segment_start_number", nextSegmentNumber.ToString(CultureInfo.InvariantCulture), "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d.ts" });
+                token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
                 process = captureLauncher == null ? Launch(ffmpeg, args, session, Log) : captureLauncher(args, session, Log);
                 try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
                 if (cleaner == null) cleaner = new System.Threading.Timer(delegate { Maintain(); }, null, 1000, 1000);
                 for (int i = 0; i < 160; i++)
                 {
                     await Task.Delay(100, token);
+                    Native.ThrowIfSessionEnding();
                     if (Failure != null) throw new Exception(Failure);
                     if (process.HasExited) throw new Exception("Захват не запущен. Проверь экран и драйвер NVIDIA.\n" + ErrorLog);
                     lock (gate) { if (ReadCurrentSegments().Count > 0) return; }
@@ -410,12 +413,13 @@ namespace ReplayLite
         }
         internal async Task RecoverAsync(CancellationToken token)
         {
+            token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
             if (stopping || session == null) throw new InvalidOperationException("Буфер остановлен.");
             await saver.WaitAsync(token);
             try
             {
                 lock (gate) { if (!recovering) BufferResetOnRecovery = false; recovering = true; }
-                await StopPipelineAsync(); token.ThrowIfCancellationRequested();
+                await StopPipelineAsync(); token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
                 lock (gate)
                 {
                     var completed = ReadSegments();
@@ -432,7 +436,8 @@ namespace ReplayLite
                 if (retainedSegments.Count > 0 && retainedVideoFormat == null)
                 {
                     retainedRotation = Config.Rotation;
-                    try { retainedVideoFormat = await ProbeVideoFormatAsync(Path.Combine(session, retainedSegments[0].Name)); }
+                    try { retainedVideoFormat = await ProbeVideoFormatAsync(Path.Combine(session, retainedSegments[0].Name), token); }
+                    catch (OperationCanceledException) { throw; }
                     catch (Exception) { DiscardRetainedSegments(); }
                 }
                 if (captureLauncher == null)
@@ -445,7 +450,8 @@ namespace ReplayLite
                 if (retainedSegments.Count > 0)
                 {
                     string currentFormat = null;
-                    try { string first; lock (gate) first = ReadCurrentSegments()[0].Name; currentFormat = await ProbeVideoFormatAsync(Path.Combine(session, first)); }
+                    try { string first; lock (gate) first = ReadCurrentSegments()[0].Name; currentFormat = await ProbeVideoFormatAsync(Path.Combine(session, first), token); }
+                    catch (OperationCanceledException) { throw; }
                     catch (Exception) { }
                     if (currentFormat != retainedVideoFormat || retainedRotation != Config.Rotation) DiscardRetainedSegments();
                 }
@@ -461,16 +467,24 @@ namespace ReplayLite
                 retainedSegments.Clear(); retainedVideoFormat = null; BufferResetOnRecovery = true;
             }
         }
-        async Task<string> ProbeVideoFormatAsync(string path)
+        async Task<string> ProbeVideoFormatAsync(string path, CancellationToken token)
         {
             using (var probe = new Process { StartInfo = new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffprobe.exe"), "-v error -select_streams v:0 -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 " + Quote(path)) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } })
             {
-                probe.Start(); Native.ProtectChild(probe); var output = probe.StandardOutput.ReadToEndAsync(); var error = probe.StandardError.ReadToEndAsync();
-                bool exited = await Task.Run(() => probe.WaitForExit(5000));
-                if (!exited) { try { probe.Kill(); } catch { } throw new TimeoutException("Не удалось проверить формат видеобуфера."); }
-                probe.WaitForExit(); string result = (await output).Trim(); string diagnostic = await error;
-                if (probe.ExitCode != 0 || result.Length == 0) throw new IOException("Не удалось прочитать видеобуфер. " + diagnostic);
-                return result;
+                token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding(); probe.Start();
+                try
+                {
+                    Native.ProtectChild(probe); var output = probe.StandardOutput.ReadToEndAsync(); var error = probe.StandardError.ReadToEndAsync();
+                    var deadline = Stopwatch.StartNew();
+                    while (!probe.HasExited && deadline.ElapsedMilliseconds < 5000)
+                    { await Task.Delay(100, token); Native.ThrowIfSessionEnding(); }
+                    token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
+                    if (!probe.HasExited) throw new TimeoutException("Не удалось проверить формат видеобуфера.");
+                    probe.WaitForExit(); string result = (await output).Trim(); string diagnostic = await error;
+                    if (probe.ExitCode != 0 || result.Length == 0) throw new IOException("Не удалось прочитать видеобуфер. " + diagnostic);
+                    return result;
+                }
+                finally { try { if (!probe.HasExited) { probe.Kill(); probe.WaitForExit(1000); } } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { } }
             }
         }
         async Task StopPipelineAsync()
@@ -500,6 +514,14 @@ namespace ReplayLite
 
     static class Native
     {
+        static volatile bool sessionEnding;
+        [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+        internal static bool SessionEnding { get { return sessionEnding || GetSystemMetrics(0x2000) != 0; } }
+        internal static void SetSessionEnding(bool ending) { sessionEnding = ending; }
+        internal static void ThrowIfSessionEnding()
+        { if (SessionEnding) throw new OperationCanceledException("Windows завершает сеанс."); }
+        internal static void StopChildrenForShutdown()
+        { lock (jobGate) { if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; } } }
         [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
         [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();

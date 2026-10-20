@@ -143,7 +143,7 @@ namespace ReplayLite
             VisibleChanged += delegate { if (!Visible) { hotkey.CancelCapture(); StopAnimations(); } else if (recorder != null && recorder.Running && !busy) RefreshBufferMetrics(); };
             Deactivate += delegate { hotkey.CancelCapture(); };
             Resize += delegate { if (WindowState == FormWindowState.Minimized) { hotkey.CancelCapture(); StopAnimations(); } };
-            FormClosing += async delegate(object sender, FormClosingEventArgs e) { if (quitting) return; e.Cancel = true; if (e.CloseReason == CloseReason.WindowsShutDown) { await Quit(); return; } Hide(); };
+            FormClosing += delegate(object sender, FormClosingEventArgs e) { if (quitting) return; if (e.CloseReason == CloseReason.WindowsShutDown) { EndWindowsSession(); return; } e.Cancel = true; Hide(); };
             Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
             Microsoft.Win32.SystemEvents.SessionSwitch += SessionChanged;
         }
@@ -290,6 +290,7 @@ namespace ReplayLite
         }
         async Task Toggle(bool background = false)
         {
+            if (Native.SessionEnding) return;
             if (!background) startupCanceled = true;
             if (busy || closing) return;
             busy = true; SyncActions(); Exception error = null;
@@ -306,6 +307,7 @@ namespace ReplayLite
                 }
             }
             catch (Exception e) { error = e; }
+            if (error != null && Native.SessionEnding) { recoveryPending = recorder != null; error = null; }
             if (error != null)
             {
                 if (recorder != null && (CaptureRecovery.IsTransient(error.ToString() + recorder.ErrorLog) || error is TimeoutException))
@@ -322,6 +324,7 @@ namespace ReplayLite
         }
         internal async Task StartInBackgroundAsync(bool startCapture = true)
         {
+            if (Native.SessionEnding) return;
             var handle = Handle; RegisterConfiguredHotkey();
             if (startCapture)
             {
@@ -331,7 +334,7 @@ namespace ReplayLite
                     {
                         try { await Task.Delay(3000, updateCancel.Token); } catch (OperationCanceledException) { return; }
                     }
-                    if (closing || released || startupCanceled || recorder != null || busy) return;
+                    if (closing || released || Native.SessionEnding || startupCanceled || recorder != null || busy) return;
                     monitorRefresh = true;
                     try { RefreshMonitors(); UpdateOptionsSummary(); }
                     finally { monitorRefresh = false; }
@@ -356,6 +359,7 @@ namespace ReplayLite
         }
         async Task SaveReplay()
         {
+            if (Native.SessionEnding) return;
             if (recorder == null || busy || saving || closing) return;
             if (recoveryPending || !recorder.Running) return;
             if (recorder.BufferedSeconds <= 0) { UpdateSaveAvailability(0); SetState("Накапливаем первые кадры…", TrayState.Recording); return; }
@@ -366,6 +370,7 @@ namespace ReplayLite
         }
         async Task RefreshState()
         {
+            if (Native.SessionEnding) return;
             if (!testing && !closing && !released && DateTime.UtcNow >= nextUpdateCheck) { var pending = CheckForUpdates(); }
             if (recorder == null || busy || closing) return;
             if (recoveryPending)
@@ -393,7 +398,7 @@ namespace ReplayLite
         }
         void ScheduleRecovery()
         {
-            if (recorder == null || closing || released) return;
+            if (recorder == null || closing || released || Native.SessionEnding) return;
             recoveryPending = true; nextRecovery = DateTime.UtcNow;
             SetState("Ожидаем доступ к экрану…", TrayState.Saving);
             stateDetail.Text = "Windows временно не отдаёт изображение.\nЗахват восстановится автоматически; запись можно остановить.";
@@ -401,7 +406,7 @@ namespace ReplayLite
         }
         async Task TryRecoverCapture()
         {
-            if (recorder == null || busy || saving || closing || !recoveryPending) return;
+            if (recorder == null || busy || saving || closing || Native.SessionEnding || !recoveryPending) return;
             busy = true; SyncActions(); Exception fatal = null;
             try
             {
@@ -448,7 +453,16 @@ namespace ReplayLite
         { if (e.Mode == Microsoft.Win32.PowerModes.Resume && !IsDisposed && IsHandleCreated) BeginInvoke(new Action(delegate { if (recorder != null) ScheduleRecovery(); })); }
         void SessionChanged(object sender, Microsoft.Win32.SessionSwitchEventArgs e)
         { if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock && IsHandleCreated && !released) BeginInvoke(new Action(delegate { if (recoveryPending) nextRecovery = DateTime.UtcNow; })); }
-        void ShowError(string message) { if (testing) throw new InvalidOperationException(message); Restore(); MessageBox.Show(this, message, "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        void ShowError(string message) { if (closing || released || Native.SessionEnding) return; if (testing) throw new InvalidOperationException(message); Restore(); MessageBox.Show(this, message, "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        void EndWindowsSession()
+        {
+            if (released) return;
+            Native.SetSessionEnding(true); closing = quitting = startupCanceled = true;
+            recoveryPending = false; updateCancel.Cancel(); timer.Stop(); StopAnimations();
+            // No asynchronous close or new process: Windows may terminate us after WM_ENDSESSION returns.
+            Native.StopChildrenForShutdown();
+            ReleaseUi();
+        }
         async Task Quit()
         {
             if (closing) return; closing = true; updateCancel.Cancel(); timer.Stop(); StopAnimations(); SyncActions();
@@ -472,8 +486,9 @@ namespace ReplayLite
         }
         async Task RefreshDisplayAsync()
         {
+            if (Native.SessionEnding) return;
             if (monitorRefresh) return; monitorRefresh = true;
-            try { while (busy && !closing && !released) await Task.Delay(100); if (released || closing) return; RefreshMonitors(); UpdateOptionsSummary(); if (recorder != null) ScheduleRecovery(); }
+            try { while (busy && !closing && !released && !Native.SessionEnding) await Task.Delay(100); if (released || closing || Native.SessionEnding) return; RefreshMonitors(); UpdateOptionsSummary(); if (recorder != null) ScheduleRecovery(); }
             finally { monitorRefresh = false; }
         }
         void ReleaseUi()
@@ -490,6 +505,14 @@ namespace ReplayLite
         { base.OnShown(e); RegisterConfiguredHotkey(); if (!testing && !startInTray) await CheckForUpdates(); }
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == 0x0011)
+            { Native.SetSessionEnding(true); message.Result = new IntPtr(1); return; }
+            if (message.Msg == 0x0016)
+            {
+                if (message.WParam != IntPtr.Zero) EndWindowsSession();
+                else { Native.SetSessionEnding(false); if (recorder != null) ScheduleRecovery(); }
+                message.Result = IntPtr.Zero; return;
+            }
             if (message.Msg == 0x0312 && message.WParam.ToInt32() == 1) { if (!hotkey.IsCapturing) { var pending = SaveReplay(); } return; }
             if (message.Msg == 0x007e && IsHandleCreated && !released) BeginInvoke(new Action(async delegate { await RefreshDisplayAsync(); }));
             base.WndProc(ref message);
@@ -553,6 +576,27 @@ namespace ReplayLite
             report.AppendLine("STARTUP_INITIALIZATION_NO_VISIBLE_TRANSITIONS_AND_RESTORE: PASS");
             report.AppendLine("STARTUP_FAILURE_RETRIES_STAY_HIDDEN: PASS");
             report.AppendLine("RECOVERY_PENDING_CAN_BE_STOPPED: PASS");
+            using (var shutdown = new MainForm(true, true))
+            {
+                try
+                {
+                    var handle = shutdown.Handle; shutdown.recorder = new Recorder(new Settings()); shutdown.ScheduleRecovery();
+                    var query = Message.Create(handle, 0x0011, IntPtr.Zero, IntPtr.Zero); shutdown.WndProc(ref query);
+                    await shutdown.RefreshState(); await shutdown.RefreshDisplayAsync(); await shutdown.Toggle(); await shutdown.SaveReplay();
+                    shutdown.ShowError("Must stay quiet at shutdown");
+                    if (query.Result != new IntPtr(1) || !Native.SessionEnding || shutdown.recorder == null || shutdown.busy || shutdown.closing || shutdown.Visible) throw new Exception("Shutdown query started capture, showed UI or exited prematurely.");
+                    var canceled = Message.Create(handle, 0x0016, IntPtr.Zero, IntPtr.Zero); shutdown.WndProc(ref canceled);
+                    if (Native.SessionEnding || !shutdown.recoveryPending || shutdown.closing) throw new Exception("Canceled shutdown did not permit recovery.");
+                    using (var child = Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), new[] { "-v", "error", "-re", "-f", "lavfi", "-i", "color=s=64x64:r=1", "-t", "30", "-f", "null", "-" }, AppDomain.CurrentDomain.BaseDirectory, null))
+                    {
+                        var ended = Message.Create(handle, 0x0016, new IntPtr(1), IntPtr.Zero); shutdown.WndProc(ref ended);
+                        if (!child.WaitForExit(2000) || !shutdown.released || !shutdown.closing || shutdown.recoveryPending || shutdown.timer.Enabled || shutdown.tray.Visible) throw new Exception("Confirmed shutdown kept media process or UI alive.");
+                    }
+                }
+                finally { Native.SetSessionEnding(false); }
+            }
+            report.AppendLine("SHUTDOWN_QUERY_BLOCKS_CAPTURE_AND_ERRORS_CANCEL_RESUMES: PASS");
+            report.AppendLine("CONFIRMED_SHUTDOWN_STOPS_CHILDREN_AND_TRAY_SYNCHRONOUSLY: PASS");
             var newer = new ReleaseInfo { Version = new Version(99, 1, 2, 0) };
             if (!SetAvailableRelease(newer) || !trayUpdate.Available || !update.Text.Contains("99.1.2") || SetAvailableRelease(newer)) throw new Exception("Update notification missing or repeated.");
             var updateMenu = (RoundedMenu)tray.ContextMenuStrip; updateMenu.Show(this, new Point(30, 100)); await Task.Delay(25); VerifyMenuForTest(updateMenu, true, 6); updateMenu.Close();
