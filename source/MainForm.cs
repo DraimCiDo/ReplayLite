@@ -573,11 +573,16 @@ namespace ReplayLite
                 launch.recorder = new Recorder(new Settings()); launch.ScheduleRecovery();
                 if (!launch.start.Enabled || launch.save.Enabled || !launch.recoveryPending || launch.start.Text != "Остановить запись") throw new Exception("Recovery stop command unavailable.");
                 await launch.Toggle(); if (launch.recorder != null || launch.recoveryPending || launch.busy) throw new Exception("Manual stop did not cancel pending recovery.");
+                launch.recorder = new Recorder(new Settings()); launch.recorder.Failure = "[Parsed_ddagrab_0] Desktop duplication access denied";
+                launch.saving = true; await launch.RefreshState(); launch.saving = false;
+                if (!launch.recoveryPending || launch.busy || launch.recorder == null || launch.Visible) throw new Exception("Text-only duplication denial was not queued for quiet recovery.");
+                await launch.Toggle();
                 launch.Restore(); if (!launch.Visible) throw new Exception("Background window cannot be restored.");
             }
             report.AppendLine("STARTUP_INITIALIZATION_NO_VISIBLE_TRANSITIONS_AND_RESTORE: PASS");
             report.AppendLine("STARTUP_FAILURE_RETRIES_STAY_HIDDEN: PASS");
             report.AppendLine("RECOVERY_PENDING_CAN_BE_STOPPED: PASS");
+            report.AppendLine("TEXT_ONLY_ACCESS_DENIED_QUEUES_RECOVERY_WITHOUT_MODAL: PASS");
             using (var shutdown = new MainForm(true, true))
             {
                 try

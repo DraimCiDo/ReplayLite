@@ -267,10 +267,10 @@ namespace ReplayLite
                     await Task.Delay(100, token);
                     Native.ThrowIfSessionEnding();
                     if (Failure != null) throw new Exception(Failure);
-                    if (process.HasExited) throw new Exception("Захват не запущен. Проверь экран и драйвер NVIDIA.\n" + ErrorLog);
+                    if (process.HasExited) throw new Exception("Захват не запущен. Проверь экран и драйвер NVIDIA.");
                     lock (gate) { if (ReadCurrentSegments().Count > 0) return; }
                 }
-                throw new TimeoutException("За 16 секунд не появился видеобуфер.\n" + ErrorLog);
+                throw new TimeoutException("За 16 секунд не появился видеобуфер.");
             }
             catch (Exception e) { startupError = e; }
             await StopPipelineAsync();

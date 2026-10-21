@@ -16,11 +16,17 @@ namespace ReplayLite
         static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
         sealed class Capture
         {
-            internal int Failures, Width = 64;
+            internal int Failures, Denials, Width = 64;
             internal bool PermanentFailure, EndSessionOnLaunch, CancelStart;
             internal Process Launch(List<string> production, string session, Action<string> log)
             {
                 if (CancelStart) { Native.SetSessionEnding(false); throw new OperationCanceledException("Windows завершает сеанс."); }
+                if (Denials > 0)
+                {
+                    Denials--; log("[Parsed_ddagrab_0] Desktop duplication access denied");
+                    log("[vost#0:0/h264_nvenc] Could not open encoder before EOF");
+                    return Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), new[] { "-v", "quiet", "-replaylite-denied-fixture" }, session, log);
+                }
                 if (Failures > 0) { Failures--; throw new IOException("[Parsed_ddagrab_0] DuplicateOutput failed: 80070005"); }
                 if (PermanentFailure) throw new IOException("Недостаточно места для буфера");
                 int output = production.FindLastIndex(s => s == "-f");
@@ -79,6 +85,8 @@ namespace ReplayLite
                 try
                 {
                     Assert(CaptureRecovery.IsTransient("[Parsed_ddagrab_0] AcquireNextFrame failed: 887a0026"), "Access lost not classified");
+                    Assert(CaptureRecovery.IsTransient("[Parsed_ddagrab_0] Desktop duplication access denied\n[vost#0:0/h264_nvenc] Could not open encoder before EOF") && CaptureRecovery.IsTransient("DESKTOP DUPLICATION ACCESS DENIED"), "Text-only duplication denial not classified");
+                    Assert(!CaptureRecovery.IsTransient("Access denied to output folder") && !CaptureRecovery.IsTransient("h264_nvenc: Invalid argument"), "Unrelated permission or encoder error classified as transient");
                     Assert(!CaptureRecovery.IsTransient("Guessed Channel Layout: stereo") && !CaptureRecovery.IsTransient("Недостаточно места для буфера"), "Permanent error classified as transient");
                     Assert(CaptureRecovery.RetrySeconds(20) == 30, "Retry backoff not bounded"); report.AppendLine("DXGI_CLASSIFICATION_AND_BOUNDED_BACKOFF: PASS");
                     await recorder.StartAsync(); await Task.Delay(2200); await LoseDesktop(recorder);
@@ -106,6 +114,15 @@ namespace ReplayLite
                         Assert(failed && recorder.BufferedSeconds >= before - .05, "Temporary recovery failure discarded buffer");
                     }
                     report.AppendLine("TEMPORARILY_UNAVAILABLE_DESKTOP_RETAINS_BUFFER: PASS");
+                    capture.Denials = 2;
+                    for (int i = 0; i < 2; i++)
+                    {
+                        bool denied = false;
+                        try { await recorder.RecoverAsync(CancellationToken.None); }
+                        catch (IOException error) { denied = CaptureRecovery.IsTransient(error.Message); }
+                        Assert(denied && recorder.BufferedSeconds >= before - .05, "Text-only access denial discarded retained buffer");
+                    }
+                    report.AppendLine("TEXT_ONLY_ACCESS_DENIED_RETRIES_RETAIN_BUFFER: PASS");
                     await recorder.RecoverAsync(CancellationToken.None);
                     Assert(recorder.Running && recorder.ProcessId != oldPid && recorder.BufferedSeconds > before && !recorder.BufferResetOnRecovery, "Capture did not recover with retained buffer");
                     foreach (var pair in hashes) Assert(Hash(Path.Combine(Session(recorder), pair.Key)) == pair.Value, "Retained file overwritten");
@@ -127,6 +144,21 @@ namespace ReplayLite
                     capture.PermanentFailure = true; bool permanent = false;
                     try { await recorder.RecoverAsync(CancellationToken.None); } catch (IOException error) { permanent = !CaptureRecovery.IsTransient(error.ToString()); }
                     Assert(permanent, "Stale DXGI log hides permanent failure"); report.AppendLine("PERMANENT_FAILURE_NOT_HIDDEN_BY_OLD_DXGI_LOG: PASS");
+                    var deniedStart = new Capture { Denials = 1 };
+                    using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, deniedStart.Launch))
+                    {
+                        bool retry = false;
+                        try { await startup.StartAsync(); }
+                        catch (IOException error)
+                        {
+                            retry = CaptureRecovery.IsTransient(error.Message);
+                            Assert(error.Message.Split(new[] { "Desktop duplication access denied" }, StringSplitOptions.None).Length == 2, "Startup diagnostics repeated the same FFmpeg log");
+                        }
+                        Assert(retry && Directory.Exists(Session(startup)) && !startup.Running, "Initial access denial destroyed recovery session");
+                        await startup.RecoverAsync(CancellationToken.None); Assert(startup.Running, "Initial access denial did not recover");
+                        string clip = await startup.SaveAsync(); await Decode(clip); await startup.StopAsync();
+                    }
+                    report.AppendLine("INITIAL_TEXT_ONLY_ACCESS_DENIED_RECOVERS_AND_LOG_IS_NOT_DUPLICATED: PASS");
                     foreach (bool alreadyCanceled in new[] { false, true })
                     {
                         var starting = new Capture { EndSessionOnLaunch = !alreadyCanceled, CancelStart = alreadyCanceled };

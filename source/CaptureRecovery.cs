@@ -11,6 +11,7 @@ namespace ReplayLite
         {
             if (string.IsNullOrEmpty(message)) return false;
             string text = message.ToLowerInvariant();
+            if (text.Contains("desktop duplication access denied")) return true;
             foreach (string code in new[] { "887a0026", "887a0005", "887a0007", "887a0028", "887a0029", "887a002b", "dxgi_error_access_lost", "dxgi_error_device_removed", "dxgi_error_device_reset", "dxgi_error_session_disconnected" })
                 if (text.Contains(code)) return true;
             return text.Contains("80070005") && (text.Contains("ddagrab") || text.Contains("duplicateoutput"));
