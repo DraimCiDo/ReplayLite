@@ -16,11 +16,19 @@ namespace ReplayLite
         static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
         sealed class Capture
         {
-            internal int Failures, Denials, Width = 64;
+            internal int Failures, Denials, UnknownExits, Width = 64;
+            internal readonly List<string> Graphs = new List<string>();
             internal bool PermanentFailure, EndSessionOnLaunch, CancelStart;
             internal Process Launch(List<string> production, string session, Action<string> log)
             {
+                Graphs.Add(production[production.IndexOf("-filter_complex") + 1]);
+                Assert(production[production.IndexOf("-fps_mode") + 1] == "vfr" && production[production.IndexOf("-enc_time_base:v") + 1] == "1:30" && !Graphs.Last().Contains("hwdownload") && production.Contains("expr:gte(t,n_forced*2)"), "Capture adds CPU downloads or CFR catch-up duplication");
                 if (CancelStart) { Native.SetSessionEnding(false); throw new OperationCanceledException("Windows завершает сеанс."); }
+                if (UnknownExits > 0)
+                {
+                    UnknownExits--; log("Unrecognized native capture failure without a DXGI code");
+                    return Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), new[] { "-v", "quiet", "-replaylite-denied-fixture" }, session, log);
+                }
                 if (Denials > 0)
                 {
                     Denials--; log("[Parsed_ddagrab_0] Desktop duplication access denied");
@@ -31,6 +39,7 @@ namespace ReplayLite
                 if (PermanentFailure) throw new IOException("Недостаточно места для буфера");
                 int output = production.FindLastIndex(s => s == "-f");
                 var args = new List<string> { "-v", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=" + Width + "x64:rate=5", "-an", "-c:v", "libx264", "-preset", "ultrafast", "-g", "10", "-bf", "0" };
+                args.AddRange(new[] { "-enc_time_base:v", production[production.IndexOf("-enc_time_base:v") + 1], "-fps_mode", production[production.IndexOf("-fps_mode") + 1] });
                 args.AddRange(production.Skip(output));
                 var process = Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), args, session, log);
                 if (EndSessionOnLaunch) Native.SetSessionEnding(true);
@@ -43,20 +52,35 @@ namespace ReplayLite
         static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
         static string Hash(string path)
         { using (var hash = SHA256.Create()) using (var file = File.OpenRead(path)) return Convert.ToBase64String(hash.ComputeHash(file)); }
-        static async Task LoseDesktop(Recorder recorder)
+        static async Task LoseDesktop(Recorder recorder, string diagnostic = "[Parsed_ddagrab_0] DDA ReleaseFrame failed!")
         {
             var process = (Process)typeof(Recorder).GetField("process", Private).GetValue(recorder);
             try { await process.StandardInput.WriteLineAsync("q"); } catch (IOException) { }
             bool exited = await Task.Run(() => process.WaitForExit(5000)); Assert(exited, "Fixture did not stop"); process.WaitForExit();
-            typeof(Recorder).GetMethod("Log", Private).Invoke(recorder, new object[] { "[Parsed_ddagrab_0] AcquireNextFrame failed: 887a0026" });
+            if (diagnostic != null) typeof(Recorder).GetMethod("Log", Private).Invoke(recorder, new object[] { diagnostic });
         }
-        static async Task Decode(string file)
+        internal static async Task Decode(string file)
         {
             var errors = new StringBuilder();
-            using (var process = Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), new[] { "-v", "error", "-i", file, "-f", "null", "-" }, Path.GetDirectoryName(file), line => { lock (errors) errors.AppendLine(line); }))
+            using (var process = Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), new[] { "-v", "error", "-xerror", "-err_detect", "explode", "-i", file, "-fps_mode", "passthrough", "-enc_time_base:v", "demux", "-f", "null", "-" }, Path.GetDirectoryName(file), line => { lock (errors) errors.AppendLine(line); }))
             {
                 bool exited = await Task.Run(() => process.WaitForExit(10000)); if (!exited) { process.Kill(); throw new Exception("Decode timed out"); }
                 process.WaitForExit(); Assert(process.ExitCode == 0 && errors.Length == 0, "Recovered clip failed decoding: " + errors);
+            }
+            using (var probe = new Process { StartInfo = new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffprobe.exe"), "-v error -select_streams v:0 -show_entries packet=dts -of csv=p=0 " + Recorder.Quote(file)) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } })
+            {
+                probe.Start();
+                try
+                {
+                    Native.ProtectChild(probe); var output = probe.StandardOutput.ReadToEndAsync(); var diagnostic = probe.StandardError.ReadToEndAsync();
+                    Assert(await Task.Run(() => probe.WaitForExit(5000)), "Packet timestamp probe timed out"); probe.WaitForExit();
+                    string packets = await output, error = await diagnostic; Assert(probe.ExitCode == 0 && error.Length == 0, "Packet timestamp probe failed: " + error);
+                    long previous = long.MinValue; int count = 0;
+                    foreach (string line in packets.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    { long dts; Assert(long.TryParse(line.Split(',')[0], out dts) && dts > previous, "MP4 contains non-monotonic video DTS"); previous = dts; count++; }
+                    Assert(count > 0, "MP4 contains no video packets");
+                }
+                finally { try { if (!probe.HasExited) { probe.Kill(); probe.WaitForExit(1000); } } catch (InvalidOperationException) { } }
             }
         }
         static async Task InterruptProbe(Recorder recorder)
@@ -90,6 +114,9 @@ namespace ReplayLite
                     Assert(!CaptureRecovery.IsTransient("Guessed Channel Layout: stereo") && !CaptureRecovery.IsTransient("Недостаточно места для буфера"), "Permanent error classified as transient");
                     Assert(CaptureRecovery.RetrySeconds(20) == 30, "Retry backoff not bounded"); report.AppendLine("DXGI_CLASSIFICATION_AND_BOUNDED_BACKOFF: PASS");
                     await recorder.StartAsync(); await Task.Delay(2200); await LoseDesktop(recorder);
+                    for (int i = 0; i < 30; i++) typeof(Recorder).GetMethod("Log", Private).Invoke(recorder, new object[] { "Unrecognized trailing diagnostic " + i });
+                    Assert(recorder.NeedsRecovery && !CaptureRecovery.IsTransient(recorder.ErrorLog), "Capture exit depends on matching its log text");
+                    report.AppendLine("RUNTIME_EXIT_RECOVERS_WITH_UNKNOWN_OR_TRUNCATED_DIAGNOSTICS: PASS");
                     var old = Segments(recorder); Assert(old.Count > 0, "No retained fixture frames");
                     var hashes = old.ToDictionary(s => s.Name, s => Hash(Path.Combine(Session(recorder), s.Name)));
                     int oldPid = recorder.ProcessId; double before = recorder.BufferedSeconds;
@@ -124,11 +151,23 @@ namespace ReplayLite
                     }
                     report.AppendLine("TEXT_ONLY_ACCESS_DENIED_RETRIES_RETAIN_BUFFER: PASS");
                     await recorder.RecoverAsync(CancellationToken.None);
+                    Assert(capture.Graphs.Last().StartsWith("gfxcapture=hmonitor=") && recorder.UsingGraphicsCapture, "DDA failure did not switch to hardware WGC");
                     Assert(recorder.Running && recorder.ProcessId != oldPid && recorder.BufferedSeconds > before && !recorder.BufferResetOnRecovery, "Capture did not recover with retained buffer");
                     foreach (var pair in hashes) Assert(Hash(Path.Combine(Session(recorder), pair.Key)) == pair.Value, "Retained file overwritten");
                     var combined = Segments(recorder);
                     Assert(combined.Select(s => s.Name).Distinct().Count() == combined.Count && combined.Zip(combined.Skip(1), (a, b) => b.Start >= a.End - .001).All(v => v), "Recovery timeline or numbering overlaps");
                     report.AppendLine("RECOVERY_PRESERVES_SEGMENTS_AND_CONTINUES_TIMELINE: PASS");
+                    // Advance the monotonic watchdog clock without waiting 15 seconds; use the real segment list and running process.
+                    bool wasGraphics = recorder.UsingGraphicsCapture;
+                    typeof(Recorder).GetField("graphicsCapture", Private).SetValue(recorder, false);
+                    typeof(Recorder).GetField("lastCompletedSegment", Private).SetValue(recorder, Segments(recorder).Last().Name);
+                    typeof(Recorder).GetField("lastProgressTick", Private).SetValue(recorder, Stopwatch.GetTimestamp() - 16 * Stopwatch.Frequency);
+                    typeof(Recorder).GetMethod("Maintain", Private).Invoke(recorder, null);
+                    Assert(recorder.Running && recorder.NeedsRecovery, "Live process with stale DDA segments was treated as healthy");
+                    typeof(Recorder).GetField("graphicsCapture", Private).SetValue(recorder, wasGraphics);
+                    await recorder.RecoverAsync(CancellationToken.None);
+                    Assert(!recorder.UsingGraphicsCapture && !recorder.NeedsRecovery && capture.Graphs.Last().StartsWith("ddagrab="), "Watchdog recovery did not switch source and clear fault");
+                    report.AppendLine("DDA_STALL_WATCHDOG_SWITCHES_SOURCE_AND_PRESERVES_BUFFER: PASS");
                     string first = await recorder.SaveAsync(); await Decode(first);
                     Assert(!Segments(recorder).Any(s => hashes.ContainsKey(s.Name)), "Saved retained frames repeated");
                     report.AppendLine("EXPORT_ACROSS_RESTART_DECODE_AND_RESET: PASS");
@@ -159,6 +198,17 @@ namespace ReplayLite
                         string clip = await startup.SaveAsync(); await Decode(clip); await startup.StopAsync();
                     }
                     report.AppendLine("INITIAL_TEXT_ONLY_ACCESS_DENIED_RECOVERS_AND_LOG_IS_NOT_DUPLICATED: PASS");
+                    var unknown = new Capture { UnknownExits = 2 };
+                    using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, unknown.Launch))
+                    {
+                        bool retry = false;
+                        try { await startup.StartAsync(); } catch (CaptureUnavailableException error) { retry = CaptureRecovery.ShouldRetry(error); }
+                        Assert(retry && Directory.Exists(Session(startup)), "Unknown startup exit did not retain its recovery session");
+                        try { await startup.RecoverAsync(CancellationToken.None); Assert(false, "Unknown fixture did not fail"); } catch (CaptureUnavailableException) { }
+                        await startup.RecoverAsync(CancellationToken.None); Assert(startup.Running, "Unknown source failure did not recover");
+                        await startup.StopAsync();
+                    }
+                    report.AppendLine("UNKNOWN_STARTUP_AND_RECOVERY_PROCESS_FAILURES_RETRY_WITH_TYPED_ERROR: PASS");
                     foreach (bool alreadyCanceled in new[] { false, true })
                     {
                         var starting = new Capture { EndSessionOnLaunch = !alreadyCanceled, CancelStart = alreadyCanceled };

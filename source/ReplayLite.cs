@@ -174,6 +174,13 @@ namespace ReplayLite
         volatile bool recovering;
         string retainedVideoFormat;
         int retainedRotation;
+        bool graphicsCapture;
+        IntPtr captureMonitor;
+        string captureFault, lastCompletedSegment;
+        long lastProgressTick;
+        public bool UsingGraphicsCapture { get { return graphicsCapture; } }
+        internal int OutputRotation { get { return graphicsCapture ? 0 : Config.Rotation; } }
+        public bool NeedsRecovery { get { lock (gate) { return !stopping && session != null && Failure == null && (captureFault != null || (process != null && process.HasExited)); } } }
         public bool BufferResetOnRecovery { get; private set; }
         volatile bool stopping;
         public string Failure;
@@ -236,30 +243,40 @@ namespace ReplayLite
             try { await StartPipelineAsync(CancellationToken.None); recovering = false; }
             catch (Exception error) { startupError = error; }
             if (startupError == null) return;
-            if (!(startupError is OperationCanceledException) && !CaptureRecovery.IsTransient(startupError.ToString() + ErrorLog) && !(startupError is TimeoutException)) await StopAsync();
+            if (!(startupError is OperationCanceledException) && !CaptureRecovery.ShouldRetry(startupError)) await StopAsync();
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startupError).Throw();
         }
         async Task StartPipelineAsync(CancellationToken token)
         {
-            Exception startupError = null;
+            Exception startupError = null; bool launched = false;
             try
             {
                 token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
-                Failure = null; lock (logGate) errors.Clear(); CheckSpace();
+                Failure = null; captureFault = null; lock (logGate) errors.Clear(); CheckSpace();
+                if (captureLauncher == null)
+                {
+                    var monitor = MonitorCatalog.Enumerate().FirstOrDefault(m => m.CanCapture && (!string.IsNullOrEmpty(Config.MonitorId) ? string.Equals(m.Id, Config.MonitorId, StringComparison.OrdinalIgnoreCase) : m.Adapter == Config.DisplayAdapter && m.Output == Config.Display));
+                    if (monitor == null) throw new CaptureUnavailableException("Выбранный монитор временно недоступен.");
+                    Config.DisplayAdapter = monitor.Adapter; Config.Display = monitor.Output; Config.Rotation = monitor.Rotation; captureMonitor = monitor.Handle;
+                    if (graphicsCapture && captureMonitor == IntPtr.Zero) throw new CaptureUnavailableException("Windows не вернула дескриптор выбранного монитора.");
+                }
                 if (Config.Audio != "none") audio.Add(new AudioPipe(true));
                 if (Config.Audio == "both") audio.Add(new AudioPipe(false));
                 foreach (var a in audio) a.Start();
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture" };
                 foreach (var a in audio) args.AddRange(new[] { "-thread_queue_size", "32", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", a.InputPath });
-                string graph = "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=1[v]";
+                string graph = graphicsCapture
+                    ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=1:display_border=0[v]"
+                    : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=1[v]";
                 if (audio.Count == 2) graph += ";[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:latency=1[a]";
-                args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-fps_mode", "cfr" });
+                args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-force_key_frames", "expr:gte(t,n_forced*2)", "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-enc_time_base:v", "1:" + Config.Fps.ToString(CultureInfo.InvariantCulture), "-fps_mode", "vfr" });
                 if (audio.Count == 2) args.AddRange(new[] { "-map", "[a]" });
                 else if (audio.Count == 1) args.AddRange(new[] { "-map", "0:a" });
                 if (audio.Count > 0) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k", "-threads:a", "1" });
                 args.AddRange(new[] { "-f", "segment", "-segment_format", "mpegts", "-segment_time", "2", "-segment_start_number", nextSegmentNumber.ToString(CultureInfo.InvariantCulture), "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d.ts" });
                 token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
                 process = captureLauncher == null ? Launch(ffmpeg, args, session, Log) : captureLauncher(args, session, Log);
+                launched = true;
                 try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
                 if (cleaner == null) cleaner = new System.Threading.Timer(delegate { Maintain(); }, null, 1000, 1000);
                 for (int i = 0; i < 160; i++)
@@ -268,7 +285,7 @@ namespace ReplayLite
                     Native.ThrowIfSessionEnding();
                     if (Failure != null) throw new Exception(Failure);
                     if (process.HasExited) throw new Exception("Захват не запущен. Проверь экран и драйвер NVIDIA.");
-                    lock (gate) { if (ReadCurrentSegments().Count > 0) return; }
+                    lock (gate) { var completed = ReadCurrentSegments(); if (completed.Count > 0) { lastCompletedSegment = completed.Last().Name; lastProgressTick = Stopwatch.GetTimestamp(); return; } }
                 }
                 throw new TimeoutException("За 16 секунд не появился видеобуфер.");
             }
@@ -278,6 +295,7 @@ namespace ReplayLite
             {
                 string diagnostic = startupError.Message + "\n" + ErrorLog;
                 if (startupError is TimeoutException) throw new TimeoutException(diagnostic, startupError);
+                if (launched || startupError is CaptureUnavailableException) throw new CaptureUnavailableException(diagnostic, startupError);
                 throw new IOException(diagnostic, startupError);
             }
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startupError).Throw();
@@ -323,8 +341,14 @@ namespace ReplayLite
                 lock (gate)
                 {
                     if (stopping || recovering || process == null) return;
-                    if (process.HasExited) { Failure = "FFmpeg остановился.\n" + ErrorLog; return; }
+                    if (process.HasExited) { captureFault = "Процесс захвата завершился."; return; }
                     foreach (var a in audio) if (a.Failure != null) { Failure = "Ошибка аудиоустройства: " + a.Failure; return; }
+                    var completed = ReadCurrentSegments();
+                    if (completed.Count > 0 && completed.Last().Name != lastCompletedSegment)
+                    { lastCompletedSegment = completed.Last().Name; lastProgressTick = Stopwatch.GetTimestamp(); }
+                    // WGC may legitimately wait on a static desktop; DDA is configured to produce regular frames.
+                    if (!graphicsCapture && lastProgressTick != 0 && (Stopwatch.GetTimestamp() - lastProgressTick) / (double)Stopwatch.Frequency >= 15)
+                        captureFault = "Захват не выдаёт новые видеосегменты более 15 секунд.";
                     var all = Directory.GetFiles(session, "s*.ts").OrderBy(p => p, StringComparer.Ordinal).ToArray();
                     int keep = Config.Seconds / 2 + 5;
                     retainedSegments.RemoveAll(s => (savedLastSegment != null && string.CompareOrdinal(s.Name, savedLastSegment) <= 0) || !File.Exists(Path.Combine(session, s.Name)));
@@ -385,7 +409,7 @@ namespace ReplayLite
                 output = Path.Combine(Config.Folder, "Replay-" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff") + ".mp4");
                 partial = output + ".partial.mp4";
                 var log = new StringBuilder();
-                using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-display_rotation:v:0", Config.Rotation.ToString(CultureInfo.InvariantCulture), "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", partial }, snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
+                using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-display_rotation:v:0", OutputRotation.ToString(CultureInfo.InvariantCulture), "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", partial }, snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
                 {
                     await Task.Run(delegate { if (!remux.WaitForExit(60000)) { remux.Kill(); remux.WaitForExit(); throw new TimeoutException("Сохранение заняло больше минуты."); } remux.WaitForExit(); });
                     if (remux.ExitCode != 0) throw new IOException("Не удалось сохранить повтор.\n" + log);
@@ -418,6 +442,7 @@ namespace ReplayLite
             await saver.WaitAsync(token);
             try
             {
+                bool switchSource = process == null || process.HasExited || captureFault != null;
                 lock (gate) { if (!recovering) BufferResetOnRecovery = false; recovering = true; }
                 await StopPipelineAsync(); token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
                 lock (gate)
@@ -435,17 +460,12 @@ namespace ReplayLite
                 }
                 if (retainedSegments.Count > 0 && retainedVideoFormat == null)
                 {
-                    retainedRotation = Config.Rotation;
+                    retainedRotation = OutputRotation;
                     try { retainedVideoFormat = await ProbeVideoFormatAsync(Path.Combine(session, retainedSegments[0].Name), token); }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception) { DiscardRetainedSegments(); }
                 }
-                if (captureLauncher == null)
-                {
-                    var monitor = MonitorCatalog.Enumerate().FirstOrDefault(m => m.CanCapture && (!string.IsNullOrEmpty(Config.MonitorId) ? string.Equals(m.Id, Config.MonitorId, StringComparison.OrdinalIgnoreCase) : m.Adapter == Config.DisplayAdapter && m.Output == Config.Display));
-                    if (monitor == null) throw new CaptureUnavailableException("Выбранный монитор временно недоступен.");
-                    Config.DisplayAdapter = monitor.Adapter; Config.Display = monitor.Output; Config.Rotation = monitor.Rotation;
-                }
+                if (switchSource) graphicsCapture = !graphicsCapture;
                 await StartPipelineAsync(token);
                 if (retainedSegments.Count > 0)
                 {
@@ -453,7 +473,7 @@ namespace ReplayLite
                     try { string first; lock (gate) first = ReadCurrentSegments()[0].Name; currentFormat = await ProbeVideoFormatAsync(Path.Combine(session, first), token); }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception) { }
-                    if (currentFormat != retainedVideoFormat || retainedRotation != Config.Rotation) DiscardRetainedSegments();
+                    if (currentFormat != retainedVideoFormat || retainedRotation != OutputRotation) DiscardRetainedSegments();
                 }
                 retainedVideoFormat = null; Failure = null; recovering = false;
             }

@@ -17,6 +17,7 @@ namespace ReplayLite
         bool recoveryPending;
         int recoveryFailures;
         DateTime nextRecovery;
+        DateTime recoveryHealthySince;
         readonly SelectBox duration = new SelectBox(), fps = new SelectBox(), sound = new SelectBox(), display = new SelectBox();
         readonly NumberBox rate = new NumberBox();
         readonly HotkeyBox hotkey = new HotkeyBox(); readonly Label hotkeyInfo = new Label();
@@ -312,7 +313,7 @@ namespace ReplayLite
             if (error != null && Native.SessionEnding) { recoveryPending = recorder != null; error = null; }
             if (error != null)
             {
-                if (recorder != null && (CaptureRecovery.IsTransient(error.ToString() + recorder.ErrorLog) || error is TimeoutException))
+                if (recorder != null && CaptureRecovery.ShouldRetry(error))
                 { ScheduleRecovery(); error = null; }
             }
             if (error != null)
@@ -351,7 +352,7 @@ namespace ReplayLite
         async Task StopRecorder()
         {
             var current = recorder; if (current == null) return; save.Enabled = traySave.Enabled = false;
-            recoveryPending = false; recoveryFailures = 0;
+            recoveryPending = false; recoveryFailures = 0; recoveryHealthySince = DateTime.MinValue;
             try { await current.StopAsync(); }
             finally
             {
@@ -377,11 +378,11 @@ namespace ReplayLite
             if (recorder == null || busy || closing) return;
             if (recoveryPending)
             { if (!saving && DateTime.UtcNow >= nextRecovery) await TryRecoverCapture(); return; }
-            if (recorder.Failure != null || !recorder.Running)
+            if (recorder.Failure != null || recorder.NeedsRecovery || !recorder.Running)
             {
                 busy = true; string message = recorder.Failure ?? ("Запись остановлена.\n" + recorder.ErrorLog);
-                if (CaptureRecovery.IsTransient(message + recorder.ErrorLog))
-                { busy = false; ScheduleRecovery(); if (!saving) await TryRecoverCapture(); return; }
+                if (recorder.NeedsRecovery || CaptureRecovery.IsTransient(message + recorder.ErrorLog))
+                { busy = false; ScheduleRecovery(); if (!saving && DateTime.UtcNow >= nextRecovery) await TryRecoverCapture(); return; }
                 try { await StopRecorder(); }
                 catch (Exception error) { message += "\n" + error.Message; }
                 finally { busy = false; SetState("Захват остановлен", TrayState.Error); SyncActions(); }
@@ -400,10 +401,12 @@ namespace ReplayLite
         }
         void ScheduleRecovery()
         {
-            if (recorder == null || closing || released || Native.SessionEnding) return;
-            recoveryPending = true; nextRecovery = DateTime.UtcNow;
+            if (recorder == null || closing || released || Native.SessionEnding || recoveryPending) return;
+            var now = DateTime.UtcNow; bool unstable = recoveryHealthySince != DateTime.MinValue && now - recoveryHealthySince < TimeSpan.FromSeconds(30);
+            if (unstable) recoveryFailures = Math.Min(30, recoveryFailures + 1); else recoveryFailures = 0;
+            recoveryPending = true; nextRecovery = now.AddSeconds(unstable ? CaptureRecovery.RetrySeconds(recoveryFailures) : 0);
             SetState("Ожидаем доступ к экрану…", TrayState.Saving);
-            stateDetail.Text = "Windows временно не отдаёт изображение.\nЗахват восстановится автоматически; запись можно остановить.";
+            stateDetail.Text = "Перезапускаем захват; при необходимости используем резервный способ.\nЗапись можно остановить обычной кнопкой.";
             UpdateSaveAvailability(0); SyncActions();
         }
         async Task TryRecoverCapture()
@@ -415,18 +418,19 @@ namespace ReplayLite
                 await recorder.RecoverAsync(updateCancel.Token);
                 if (!closing && !released)
                 {
-                    recoveryPending = false; recoveryFailures = 0;
+                    recoveryPending = false; recoveryHealthySince = DateTime.UtcNow;
                     monitorRefresh = true;
                     try { RefreshMonitors(); UpdateOptionsSummary(); } finally { monitorRefresh = false; }
                     lastCpu = Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds + recorder.CpuSeconds; lastTime = clock.Elapsed.TotalSeconds;
                     SetState("Запись восстановлена", TrayState.Recording); RefreshBufferMetrics();
+                    if (recorder.UsingGraphicsCapture) stateDetail.Text = "Используется резервный захват Windows Graphics Capture.\nКадры кодируются на видеокарте.";
                     if (recorder.BufferResetOnRecovery) stateDetail.Text = "Формат экрана изменился — буфер начат заново.\nНовые кадры уже записываются.";
                 }
             }
             catch (OperationCanceledException) { }
             catch (Exception error)
             {
-                if (error is CaptureUnavailableException || error is TimeoutException || CaptureRecovery.IsTransient(error.ToString()))
+                if (CaptureRecovery.ShouldRetry(error))
                 {
                     recoveryFailures++; nextRecovery = DateTime.UtcNow.AddSeconds(CaptureRecovery.RetrySeconds(recoveryFailures));
                     if (!closing && !released) { SetState("Ожидаем доступ к экрану…", TrayState.Saving); stateDetail.Text = "Повторим запуск автоматически.\nПока экран недоступен, новые кадры не записываются."; }
@@ -583,6 +587,16 @@ namespace ReplayLite
             report.AppendLine("STARTUP_FAILURE_RETRIES_STAY_HIDDEN: PASS");
             report.AppendLine("RECOVERY_PENDING_CAN_BE_STOPPED: PASS");
             report.AppendLine("TEXT_ONLY_ACCESS_DENIED_QUEUES_RECOVERY_WITHOUT_MODAL: PASS");
+            using (var policy = new MainForm(true, true))
+            {
+                policy.recorder = new Recorder(new Settings()); policy.ScheduleRecovery(); var deadline = policy.nextRecovery;
+                policy.ScheduleRecovery(); if (policy.nextRecovery != deadline) throw new Exception("Display event storm bypasses recovery backoff.");
+                policy.recoveryPending = false; policy.recoveryHealthySince = DateTime.UtcNow; policy.ScheduleRecovery();
+                if (policy.nextRecovery < DateTime.UtcNow.AddSeconds(1) || policy.recoveryFailures != 1) throw new Exception("Short-lived capture success reset failure backoff.");
+                policy.recoveryPending = false; policy.recoveryHealthySince = DateTime.UtcNow.AddSeconds(-31); policy.ScheduleRecovery();
+                if (policy.recoveryFailures != 0 || policy.nextRecovery > DateTime.UtcNow.AddSeconds(1)) throw new Exception("Stable capture did not reset backoff.");
+            }
+            report.AppendLine("FLAPPING_AND_DISPLAY_EVENT_STORMS_KEEP_BOUNDED_BACKOFF: PASS");
             using (var shutdown = new MainForm(true, true))
             {
                 try
@@ -708,7 +722,11 @@ namespace ReplayLite
                 if (save.Enabled != (recorder.BufferedSeconds > 0)) throw new Exception("Save availability did not follow buffer reset.");
                 timeout.Restart(); while (recorder.BufferedSeconds <= 0 && timeout.ElapsedMilliseconds < 6000) await Task.Delay(100);
                 RefreshBufferMetrics(); if (!save.Enabled || !traySave.Enabled) throw new Exception("Saving did not become available after refill.");
-                recorder.Failure = "Synthetic capture failure"; bool reported = false;
+                try { await process.StandardInput.WriteLineAsync("q"); } catch (IOException) { }
+                if (!await Task.Run(() => process.WaitForExit(5000))) throw new Exception("Fixture process did not stop."); process.WaitForExit();
+                saving = true; await RefreshState(); saving = false;
+                if (!recoveryPending || recorder == null || busy) throw new Exception("Unknown capture exit showed an error or discarded recorder.");
+                recoveryPending = false; recorder.Failure = "Synthetic capture failure"; bool reported = false;
                 try { await RefreshState(); } catch (InvalidOperationException error) { reported = error.Message.Contains("Synthetic capture failure"); }
                 if (!reported || busy || recorder != null || start.Enabled != SelectedMonitorSupported || !duration.Enabled || !browse.Enabled) throw new Exception("Capture failure left the start controls locked.");
             }
@@ -813,19 +831,21 @@ namespace ReplayLite
                     bool exited = await Task.Run(() => capture.WaitForExit(5000));
                     if (!exited) throw new Exception("Live capture did not stop for recovery test.");
                     capture.WaitForExit();
-                    typeof(Recorder).GetMethod("Log", audioFlags).Invoke(recorder, new object[] { "[Parsed_ddagrab_0] AcquireNextFrame failed: 887a0026" });
+                    typeof(Recorder).GetMethod("Log", audioFlags).Invoke(recorder, new object[] { "[Parsed_ddagrab_0] DDA ReleaseFrame failed!" });
                     busy = false; await RefreshState();
-                    if (recorder == null || !recorder.Running || recoveryPending || recorder.ProcessId == pid || recorder.BufferResetOnRecovery || shown != 0) throw new Exception("Live NVENC recovery failed or showed a window.");
+                    if (recorder == null || !recorder.Running || !recorder.UsingGraphicsCapture || recoveryPending || recorder.ProcessId == pid || recorder.BufferResetOnRecovery || shown != 0) throw new Exception("Live hardware WGC recovery failed or showed a window.");
                     pid = recorder.ProcessId; report.AppendLine("LIVE_DXGI_RECOVERY_NEW_PROCESS_OLD_BUFFER_HIDDEN_WINDOW: PASS");
+                    busy = true; string clip = await recorder.SaveAsync(); await CaptureRecoveryTests.Decode(clip); busy = false;
+                    report.AppendLine("LIVE_WGC_WITH_SYSTEM_AND_MIC_AUDIO_EXPORT_DECODE: " + clip);
                 }
                 Restore();
                 if (!Visible || shown != 1 || recorder.ProcessId != pid || !recorder.Running) throw new Exception("Restoring the window interrupted automatic capture.");
                 report.AppendLine("STARTUP_RESTORE_PRESERVES_CAPTURE: PASS");
             }
-            catch (Exception error) { failure = error; }
+            catch (Exception error) { failure = error; if (recorder != null) report.AppendLine(recorder.ErrorLog); }
             busy = true; if (recorder != null) await StopRecorder(); busy = false;
             if (existed) File.WriteAllBytes(settingsFile, original); else if (File.Exists(settingsFile)) File.Delete(settingsFile);
-            if (failure != null) throw failure;
+            if (failure != null) throw new Exception(report.ToString(), failure);
             File.WriteAllText(Path.Combine(root, "startup-test.txt"), report.ToString(), new System.Text.UTF8Encoding(false));
         }
         internal async Task VerifyLiveUiAsync(string root)

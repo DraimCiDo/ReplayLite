@@ -4,7 +4,10 @@ using System.IO;
 namespace ReplayLite
 {
     sealed class CaptureUnavailableException : IOException
-    { internal CaptureUnavailableException(string message) : base(message) { } }
+    {
+        internal CaptureUnavailableException(string message) : base(message) { }
+        internal CaptureUnavailableException(string message, Exception inner) : base(message, inner) { }
+    }
     static class CaptureRecovery
     {
         internal static bool IsTransient(string message)
@@ -18,5 +21,7 @@ namespace ReplayLite
         }
         internal static int RetrySeconds(int failures)
         { return Math.Min(30, 1 << Math.Min(5, Math.Max(0, failures))); }
+        internal static bool ShouldRetry(Exception error)
+        { return error is CaptureUnavailableException || error is TimeoutException || (!(error is OperationCanceledException) && IsTransient(error.ToString())); }
     }
 }
