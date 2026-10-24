@@ -9,11 +9,11 @@ using System.Threading;
 #endif
 static class UpdateFixture
 {
-    static void Main()
+    static void Main(string[] args)
     {
         File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launch.txt"), Assembly.GetExecutingAssembly().GetName().Version.ToString());
 #if !NEXT
-        Thread.Sleep(3000);
+        if (args.Length == 0) Thread.Sleep(3000);
 #endif
     }
 }

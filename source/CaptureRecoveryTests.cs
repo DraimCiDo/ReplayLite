@@ -16,7 +16,7 @@ namespace ReplayLite
         static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
         sealed class Capture
         {
-            internal int Failures, Denials, UnknownExits, Width = 64;
+            internal int Failures, Denials, UnknownExits, ReleaseFrameExits, Width = 64;
             internal readonly List<string> Graphs = new List<string>();
             internal bool PermanentFailure, EndSessionOnLaunch, CancelStart;
             internal Process Launch(List<string> production, string session, Action<string> log)
@@ -24,6 +24,17 @@ namespace ReplayLite
                 Graphs.Add(production[production.IndexOf("-filter_complex") + 1]);
                 Assert(production[production.IndexOf("-fps_mode") + 1] == "vfr" && production[production.IndexOf("-enc_time_base:v") + 1] == "1:30" && !Graphs.Last().Contains("hwdownload") && production.Contains("expr:gte(t,n_forced*2)"), "Capture adds CPU downloads or CFR catch-up duplication");
                 if (CancelStart) { Native.SetSessionEnding(false); throw new OperationCanceledException("Windows завершает сеанс."); }
+                if (ReleaseFrameExits > 0)
+                {
+                    ReleaseFrameExits--; log("[aist#0:0/pcm_f32le] Guessed Channel Layout: stereo");
+                    log("[Parsed_ddagrab_0] DDA ReleaseFrame failed!");
+                    log("[Parsed_ddagrab_0] EOF timestamp not reliable");
+                    log("[fc#0] Error requesting a frame from the filtergraph: Generic error in an external library");
+                    log("[vost#0:0/h264_nvenc] Could not open encoder before EOF");
+                    log("[vost#0:0/h264_nvenc] Task finished with error code: -22 (Invalid argument)");
+                    log("[out#0/segment] Nothing was written into output file, because at least one of its streams received no packets.");
+                    return Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), new[] { "-v", "quiet", "-replaylite-denied-fixture" }, session, log);
+                }
                 if (UnknownExits > 0)
                 {
                     UnknownExits--; log("Unrecognized native capture failure without a DXGI code");
@@ -198,6 +209,19 @@ namespace ReplayLite
                         string clip = await startup.SaveAsync(); await Decode(clip); await startup.StopAsync();
                     }
                     report.AppendLine("INITIAL_TEXT_ONLY_ACCESS_DENIED_RECOVERS_AND_LOG_IS_NOT_DUPLICATED: PASS");
+                    var releaseFrame = new Capture { ReleaseFrameExits = 1 };
+                    using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, releaseFrame.Launch))
+                    {
+                        bool retry = false;
+                        try { await startup.StartAsync(); }
+                        catch (CaptureUnavailableException error)
+                        { retry = CaptureRecovery.ShouldRetry(error); Assert(error.Message.Contains("DDA ReleaseFrame failed!") && error.Message.Contains("Invalid argument"), "Screenshot diagnostic fixture was lost"); }
+                        Assert(retry && Directory.Exists(Session(startup)) && !startup.Running, "ReleaseFrame startup failure did not preserve recovery session");
+                        await startup.RecoverAsync(CancellationToken.None);
+                        Assert(startup.Running && startup.UsingGraphicsCapture && releaseFrame.Graphs.Last().StartsWith("gfxcapture=hmonitor="), "ReleaseFrame startup failure did not switch to WGC");
+                        string clip = await startup.SaveAsync(); await Decode(clip); await startup.StopAsync();
+                    }
+                    report.AppendLine("INITIAL_DDA_RELEASE_FRAME_AND_ENCODER_EOF_SWITCH_TO_WGC_AND_EXPORT: PASS");
                     var unknown = new Capture { UnknownExits = 2 };
                     using (var startup = new Recorder(new Settings { Seconds = 30, Audio = "none", Folder = root }, unknown.Launch))
                     {

@@ -483,7 +483,7 @@ namespace ReplayLite
             try
             {
                 string helperFolder = Path.Combine(Path.GetTempPath(), "ReplayLite-helper-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(helperFolder);
-                string helper = Path.Combine(helperFolder, "UpdateHelper.exe"); File.Copy(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "UpdateHelper.exe"), helper);
+                string helper = Path.Combine(helperFolder, "UpdateHelper.exe"); File.Copy(Path.Combine(stage, "UpdateHelper.exe"), helper);
                 if (recorder != null) await StopRecorder(); settings.Save();
                 Process.Start(new ProcessStartInfo(helper, Process.GetCurrentProcess().Id + " " + Recorder.Quote(AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\')) + " " + Recorder.Quote(stage)) { UseShellExecute = false, CreateNoWindow = true });
             }
