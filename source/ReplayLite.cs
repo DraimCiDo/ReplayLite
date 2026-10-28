@@ -21,19 +21,26 @@ namespace ReplayLite
         public string MonitorId = "";
         public KeyBinding Hotkey = KeyBinding.Default;
         public string Audio = "both";
+        public string SystemDevice = "", MicrophoneDevice = "", BufferFolder = "";
+        public int SystemVolume = 100, MicrophoneVolume = 100, FreeSpaceMb = 128;
+        public bool StopWhenLowSpace = true, Animations = true, SaveNotification = true, SaveSound = false, CaptureCursor = true;
+        public string BufferHome { get { return string.IsNullOrEmpty(BufferFolder) ? Home : BufferFolder; } }
         public string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "ReplayLite");
         public static readonly bool Portable = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "portable.flag"));
         public static readonly string Home = Portable ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReplayLite");
         public static Settings Load()
+        { return LoadFromFile(Path.Combine(Home, "settings.txt")); }
+        internal static Settings LoadFromFile(string file)
         {
             var s = new Settings();
             if (Portable) s.Folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Replays");
             try
             {
-                foreach (var line in File.ReadAllLines(Path.Combine(Home, "settings.txt"), Encoding.UTF8))
+                foreach (var line in File.ReadAllLines(file, Encoding.UTF8))
                 {
                     var p = line.Split(new[] { '=' }, 2); if (p.Length != 2) continue;
                     int v;
+                    bool flag;
                     switch (p[0])
                     {
                         case "Seconds": if (int.TryParse(p[1], out v)) s.Seconds = Math.Max(10, Math.Min(600, v)); break;
@@ -45,6 +52,17 @@ namespace ReplayLite
                         case "HotkeyModifiers": if (int.TryParse(p[1], out v)) s.Hotkey.Modifiers = (uint)v; break;
                         case "HotkeyKey": if (int.TryParse(p[1], out v)) s.Hotkey.Key = (Keys)v; break;
                         case "Audio": if (new[] { "both", "system", "none" }.Contains(p[1])) s.Audio = p[1]; break;
+                        case "SystemDevice": s.SystemDevice = p[1]; break;
+                        case "MicrophoneDevice": s.MicrophoneDevice = p[1]; break;
+                        case "SystemVolume": if (int.TryParse(p[1], out v)) s.SystemVolume = Math.Max(0, Math.Min(100, v)); break;
+                        case "MicrophoneVolume": if (int.TryParse(p[1], out v)) s.MicrophoneVolume = Math.Max(0, Math.Min(100, v)); break;
+                        case "FreeSpaceMb": if (int.TryParse(p[1], out v)) s.FreeSpaceMb = Math.Max(128, Math.Min(10240, v)); break;
+                        case "StopWhenLowSpace": if (bool.TryParse(p[1], out flag)) s.StopWhenLowSpace = flag; break;
+                        case "Animations": if (bool.TryParse(p[1], out flag)) s.Animations = flag; break;
+                        case "SaveNotification": if (bool.TryParse(p[1], out flag)) s.SaveNotification = flag; break;
+                        case "SaveSound": if (bool.TryParse(p[1], out flag)) s.SaveSound = flag; break;
+                        case "CaptureCursor": if (bool.TryParse(p[1], out flag)) s.CaptureCursor = flag; break;
+                        case "BufferFolder": if (p[1].Length == 0) s.BufferFolder = ""; else if (ValidAbsolutePath(p[1])) s.BufferFolder = p[1]; break;
                         case "Folder": if (Path.IsPathRooted(p[1])) s.Folder = p[1]; else if (Portable) s.Folder = Deployment.Child(AppDomain.CurrentDomain.BaseDirectory, p[1]); break;
                     }
                 }
@@ -55,12 +73,18 @@ namespace ReplayLite
             return s;
         }
         public void Save()
+        { SaveToFile(Path.Combine(Home, "settings.txt")); }
+        internal static bool ValidAbsolutePath(string path)
+        { try { string root = Path.GetPathRoot(path); return Path.IsPathRooted(path) && root.Length >= 3 && (root.StartsWith(@"\\") || root.EndsWith(@"\")) && Path.GetFullPath(path).Length > 0 && path.IndexOfAny(new[] { '\r', '\n' }) < 0; } catch (ArgumentException) { return false; } catch (NotSupportedException) { return false; } catch (PathTooLongException) { return false; } }
+        internal void SaveToFile(string file)
         {
-            Directory.CreateDirectory(Home);
-            string target = Path.Combine(Home, "settings.txt"), pending = target + ".new";
+            if (!string.IsNullOrEmpty(BufferFolder) && !ValidAbsolutePath(BufferFolder)) throw new ArgumentException("Укажите абсолютный путь папки буфера.");
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
+            string target = file, pending = target + ".new";
             string storedFolder = Folder, appPrefix = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\') + "\\";
             if (Portable && Path.GetFullPath(Folder).StartsWith(appPrefix, StringComparison.OrdinalIgnoreCase)) storedFolder = Path.GetFullPath(Folder).Substring(appPrefix.Length);
-            File.WriteAllLines(pending, new[] { "Seconds=" + Seconds, "Fps=" + Fps, "Mbps=" + Mbps, "Display=" + Display, "DisplayAdapter=" + DisplayAdapter, "MonitorId=" + MonitorId, "HotkeyModifiers=" + Hotkey.Modifiers, "HotkeyKey=" + (int)Hotkey.Key, "Audio=" + Audio, "Folder=" + storedFolder }, Encoding.UTF8);
+            File.WriteAllLines(pending, new[] { "Seconds=" + Seconds, "Fps=" + Fps, "Mbps=" + Mbps, "Display=" + Display, "DisplayAdapter=" + DisplayAdapter, "MonitorId=" + MonitorId, "HotkeyModifiers=" + Hotkey.Modifiers, "HotkeyKey=" + (int)Hotkey.Key, "Audio=" + Audio, "Folder=" + storedFolder,
+                "SystemDevice=" + SystemDevice, "MicrophoneDevice=" + MicrophoneDevice, "SystemVolume=" + SystemVolume, "MicrophoneVolume=" + MicrophoneVolume, "BufferFolder=" + BufferFolder, "FreeSpaceMb=" + FreeSpaceMb, "StopWhenLowSpace=" + StopWhenLowSpace, "Animations=" + Animations, "SaveNotification=" + SaveNotification, "SaveSound=" + SaveSound, "CaptureCursor=" + CaptureCursor }, Encoding.UTF8);
             if (File.Exists(target)) File.Replace(pending, target, null); else File.Move(pending, target);
         }
     }
@@ -75,6 +99,7 @@ namespace ReplayLite
         readonly Func<bool, IAudioSource> openSource;
         readonly AudioDeviceChanges changes;
         readonly int retryMilliseconds;
+        readonly float gain;
         volatile IAudioSource source;
         Task pump;
         volatile bool disposed;
@@ -85,9 +110,10 @@ namespace ReplayLite
         public long CapturedBytes { get { var current = source; return Interlocked.Read(ref capturedBytes) + (current == null ? 0 : current.CapturedBytes); } }
 
         public AudioPipe(bool system) : this(system, s => new WasapiAudioSource(s), AudioDeviceChanges.TryCreate(system), 5000) { }
-        internal AudioPipe(bool system, Func<bool, IAudioSource> factory, AudioDeviceChanges notifications = null, int retryMs = 5000)
+        public AudioPipe(bool system, string device, int volume) : this(system, s => new WasapiAudioSource(s, device), AudioDeviceChanges.TryCreate(system, device), 5000, volume) { }
+        internal AudioPipe(bool system, Func<bool, IAudioSource> factory, AudioDeviceChanges notifications = null, int retryMs = 5000, int volume = 100)
         {
-            SystemAudio = system; openSource = factory; changes = notifications; retryMilliseconds = retryMs;
+            SystemAudio = system; openSource = factory; changes = notifications; retryMilliseconds = retryMs; gain = Math.Max(0, Math.Min(100, volume)) / 100f;
             try { pipe = new NamedPipeServerStream(Name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16384, 16384); }
             catch { if (changes != null) changes.Dispose(); stop.Dispose(); throw; }
         }
@@ -128,6 +154,7 @@ namespace ReplayLite
                             try { int read = source.Read(values); if (read < values.Length) Array.Clear(values, read, values.Length - read); }
                             catch (Exception error) { Warning = error.Message; DropSource(); Array.Clear(values, 0, values.Length); retryAt = now + retryMilliseconds; }
                         }
+                        ApplyGain(values, gain);
                         Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
                         pipe.Write(bytes, 0, bytes.Length);
                         blocks++;
@@ -149,6 +176,8 @@ namespace ReplayLite
             if (pump == null || pump.IsCompleted) stop.Dispose();
             else pump.ContinueWith(delegate { stop.Dispose(); }, TaskScheduler.Default);
         }
+        internal static void ApplyGain(float[] values, float gain)
+        { if (gain == 1f) return; for (int i = 0; i < values.Length; i++) values[i] *= gain; }
     }
 
     public sealed class Segment
@@ -169,6 +198,7 @@ namespace ReplayLite
         string savedLastSegment;
         readonly List<Segment> retainedSegments = new List<Segment>();
         readonly Func<List<string>, string, Action<string>, Process> captureLauncher;
+        readonly Func<string, long> availableSpace;
         int nextSegmentNumber;
         double timestampOffset;
         volatile bool recovering;
@@ -202,7 +232,7 @@ namespace ReplayLite
         }
         public double BufferedSeconds { get { lock (gate) { var a = ReadSegments(); return a.Count == 0 ? 0 : Math.Min(Config.Seconds, a.Last().End - a.First().Start); } } }
         public Recorder(Settings settings) { Config = settings; }
-        internal Recorder(Settings settings, Func<List<string>, string, Action<string>, Process> launcher) { Config = settings; captureLauncher = launcher; }
+        internal Recorder(Settings settings, Func<List<string>, string, Action<string>, Process> launcher, Func<string, long> space = null) { Config = settings; captureLauncher = launcher; availableSpace = space; }
 
         public static string Quote(string value)
         {
@@ -234,8 +264,9 @@ namespace ReplayLite
         {
             if (!File.Exists(ffmpeg)) throw new FileNotFoundException("Не найден bin\\ffmpeg.exe. Распакуй всю папку приложения.");
             Directory.CreateDirectory(Config.Folder);
-            Directory.CreateDirectory(Settings.Home);
-            session = Path.Combine(Settings.Home, "buffer-" + Guid.NewGuid().ToString("N"));
+            if (!Settings.ValidAbsolutePath(Config.BufferHome)) throw new ArgumentException("Укажите абсолютный путь папки буфера.");
+            Directory.CreateDirectory(Config.BufferHome);
+            session = Path.Combine(Config.BufferHome, "buffer-" + Guid.NewGuid().ToString("N"));
             savedLastSegment = null;
             Directory.CreateDirectory(session);
             recovering = true;
@@ -260,14 +291,14 @@ namespace ReplayLite
                     Config.DisplayAdapter = monitor.Adapter; Config.Display = monitor.Output; Config.Rotation = monitor.Rotation; captureMonitor = monitor.Handle;
                     if (graphicsCapture && captureMonitor == IntPtr.Zero) throw new CaptureUnavailableException("Windows не вернула дескриптор выбранного монитора.");
                 }
-                if (Config.Audio != "none") audio.Add(new AudioPipe(true));
-                if (Config.Audio == "both") audio.Add(new AudioPipe(false));
+                if (Config.Audio != "none") audio.Add(new AudioPipe(true, Config.SystemDevice, Config.SystemVolume));
+                if (Config.Audio == "both") audio.Add(new AudioPipe(false, Config.MicrophoneDevice, Config.MicrophoneVolume));
                 foreach (var a in audio) a.Start();
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture" };
                 foreach (var a in audio) args.AddRange(new[] { "-thread_queue_size", "32", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", a.InputPath });
                 string graph = graphicsCapture
-                    ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=1:display_border=0[v]"
-                    : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=1[v]";
+                    ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=" + (Config.CaptureCursor ? "1" : "0") + ":display_border=0[v]"
+                    : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=" + (Config.CaptureCursor ? "1" : "0") + "[v]";
                 if (audio.Count == 2) graph += ";[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:latency=1[a]";
                 args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-force_key_frames", "expr:gte(t,n_forced*2)", "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-enc_time_base:v", "1:" + Config.Fps.ToString(CultureInfo.InvariantCulture), "-fps_mode", "vfr" });
                 if (audio.Count == 2) args.AddRange(new[] { "-map", "[a]" });
@@ -329,10 +360,12 @@ namespace ReplayLite
         }
         void CheckSpace()
         {
-            var drive = new DriveInfo(Path.GetPathRoot(session));
             long required = (long)((Config.Mbps * 1000000.0 / 8 + 24000) * (Config.Seconds + 12) * 1.2) + 128 * 1024 * 1024;
-            if (drive.AvailableFreeSpace < required) throw new IOException("Недостаточно места для буфера: нужно примерно " + (required / 1048576) + " МБ.");
+            required = Math.Max(required, MinimumFreeBytes);
+            if (ReadFreeSpace() < required) throw new IOException("Недостаточно места для буфера: нужно примерно " + (required / 1048576) + " МБ.");
         }
+        long ReadFreeSpace() { return availableSpace == null ? new DriveInfo(Path.GetPathRoot(session)).AvailableFreeSpace : availableSpace(session); }
+        internal long MinimumFreeBytes { get { return (long)(Config.StopWhenLowSpace ? Math.Max(128, Math.Min(10240, Config.FreeSpaceMb)) : 128) * 1048576; } }
         void Maintain()
         {
             if (stopping || recovering) return;
@@ -358,7 +391,7 @@ namespace ReplayLite
                         if (consumed) TryDeleteConsumed(all[i]);
                         else if (i < all.Length - keep) File.Delete(all[i]);
                     }
-                    if (new DriveInfo(Path.GetPathRoot(session)).AvailableFreeSpace < 128 * 1024 * 1024) Failure = "На диске осталось менее 128 МБ; запись остановлена.";
+                    if (ReadFreeSpace() < MinimumFreeBytes) Failure = "На диске осталось менее " + (MinimumFreeBytes / 1048576) + " МБ; запись остановлена.";
                 }
             }
             catch (Exception e) { if (!stopping && !recovering) Failure = "Ошибка буфера: " + e.Message; }
@@ -605,20 +638,24 @@ namespace ReplayLite
                     Application.Run(); return exitCode;
                 }
             }
-            if (args.Length == 2 && (args[0] == "--ui-test" || args[0] == "--ui-live-test"))
+            if (args.Length == 2 && (args[0] == "--ui-test" || args[0] == "--ui-live-test" || args[0] == "--advanced-live-test"))
             {
                 using (var form = new MainForm(false, true))
                 {
                     int exitCode = 1;
-                    form.Shown += async delegate { try { if (args[0] == "--ui-live-test") await form.VerifyLiveUiAsync(args[1]); else await form.VerifyUiAsync(args[1]); exitCode = 0; } catch (Exception error) { File.WriteAllText(args[0] == "--ui-live-test" ? Path.Combine(args[1], "ui-live-test.txt") : args[1], error.ToString()); } finally { Application.ExitThread(); } };
+                    bool live = args[0] != "--ui-test";
+                    if (live) Directory.CreateDirectory(args[1]);
+                    form.Shown += async delegate { try { if (live) await form.VerifyLiveUiAsync(args[1], args[0] == "--advanced-live-test"); else await form.VerifyUiAsync(args[1]); exitCode = 0; } catch (Exception error) { File.WriteAllText(live ? Path.Combine(args[1], "ui-live-test.txt") : args[1], error.ToString()); } finally { Application.ExitThread(); } };
                     Application.Run(form); return exitCode;
                 }
             }
-            if (args.Length == 2 && (args[0] == "--screenshot" || args[0] == "--settings-screenshot"))
+            if (args.Length >= 2 && (args[0] == "--screenshot" || args[0] == "--settings-screenshot" || args[0] == "--advanced-screenshot"))
             {
                 using (var form = new MainForm(false, true))
                 {
-                    if (args[0] == "--settings-screenshot") form.PreviewSettingsForDocs(); else form.PreviewForDocs(); form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
+                    if (args[0] == "--advanced-screenshot") { int category; if (args.Length < 3 || !int.TryParse(args[2], out category)) category = 0; form.PreviewAdvancedForDocs(category); }
+                    else if (args[0] == "--settings-screenshot") form.PreviewSettingsForDocs(); else form.PreviewForDocs(); form.Show(); form.Hide(); form.Show(); form.Activate(); Application.DoEvents(); form.VerifyControls(); Thread.Sleep(200);
+                    if (args[0] == "--advanced-screenshot") { form.PositionAdvancedPreview(); Application.DoEvents(); }
                     using (var image = new Bitmap(form.Width, form.Height))
                     { form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(args[1]); }
                 }

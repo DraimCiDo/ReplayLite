@@ -7,7 +7,7 @@ $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $stage = Join-Path $appRoot ('.deps-cache\packages\' + [Guid]::NewGuid().ToString('N') + '\ReplayLite')
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-foreach ($name in @('ReplayLite.exe','UpdateHelper.exe','Uninstall.exe','NAudio.dll','README.md','LICENSE','THIRD-PARTY.md','VALIDATION.md','UI-VALIDATION.md','VERSION','CHANGELOG.md')) {
+foreach ($name in @('ReplayLite.exe','UpdateHelper.exe','Uninstall.exe','NAudio.dll','README.md','AGENTS.md','LICENSE','THIRD-PARTY.md','VALIDATION.md','UI-VALIDATION.md','VERSION','CHANGELOG.md')) {
     $path = Join-Path $appRoot $name
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing package input: $name" }
     Copy-Item -LiteralPath $path -Destination (Join-Path $stage $name)
@@ -20,6 +20,7 @@ $archives = @(
     @{Name='NAudio-1.10.0.zip'; Commit='f3c2a15379731239363fd0c26d6b5fe8162a5087'; Repo='naudio/NAudio'; Prefix='NAudio'; License='license.txt'; Marker='Microsoft Public License'}
 )
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression
 foreach ($archive in $archives) {
     # GitHub guarantees contents for a commit, not the byte layout of generated ZIPs.
     # These source archives are redistributed as data, never executed or used to build dependencies.
@@ -38,7 +39,25 @@ foreach ($archive in $archives) {
 }
 [IO.File]::WriteAllText((Join-Path $stage 'portable.flag'), 'ReplayLite', [Text.UTF8Encoding]::new($false))
 $zipPath = Join-Path $outputRoot 'ReplayLite-Portable.zip'
-Compress-Archive -LiteralPath $stage -DestinationPath $zipPath -CompressionLevel Optimal -Force
+# Windows PowerShell Compress-Archive opens source files with exclusive sharing,
+# which fails while a scanner holds a read handle to a newly copied source ZIP.
+# ZipFileExtensions permits shared readers; keep the previous archive until creation succeeds.
+$pendingZip = $zipPath + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+try {
+    $packageZip = [IO.Compression.ZipFile]::Open($pendingZip, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse) {
+            # Windows PowerShell targets an older CLR profile where CreateFromDirectory
+            # emits backslashes. Explicit entry names keep the existing portable ZIP layout.
+            $entryName = 'ReplayLite/' + $file.FullName.Substring($stage.Length + 1).Replace('\', '/')
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($packageZip, $file.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally { $packageZip.Dispose() }
+    if (Test-Path -LiteralPath $zipPath) { [IO.File]::Replace($pendingZip, $zipPath, [NullString]::Value) }
+    else { [IO.File]::Move($pendingZip, $zipPath) }
+} finally {
+    if (Test-Path -LiteralPath $pendingZip) { [IO.File]::Delete($pendingZip) }
+}
 Copy-Item -LiteralPath (Join-Path $appRoot 'ReplayLite.exe') -Destination (Join-Path $outputRoot 'ReplayLite.exe') -Force
 $compiler = & (Join-Path $PSScriptRoot 'setup-installer-toolchain.ps1')
 $version = [IO.File]::ReadAllText((Join-Path $appRoot 'VERSION')).Trim()

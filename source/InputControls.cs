@@ -7,6 +7,145 @@ using System.Windows.Forms;
 
 namespace ReplayLite
 {
+    sealed class PathDisplay : Control
+    {
+        readonly Bitmap folderIcon = MenuIcons.Draw(16, MenuGlyph.Folder);
+        public PathDisplay() { Theme.Canvas(this); AccessibleRole = AccessibleRole.Text; TabStop = false; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 9))
+            using (var fill = new SolidBrush(Theme.Input)) using (var line = new Pen(Theme.Border)) { e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(line, path); }
+            e.Graphics.DrawImage(folderIcon, 12, (Height - 16) / 2, 16, 16);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(37, 0, Width - 47, Height), Enabled ? Theme.Text : Theme.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.PathEllipsis | TextFormatFlags.NoPrefix);
+        }
+        protected override void Dispose(bool disposing) { if (disposing) folderIcon.Dispose(); base.Dispose(disposing); }
+    }
+    sealed class SettingsScrollPanel : Panel
+    {
+        public readonly Panel Content = new Panel { BackColor = Theme.Card };
+        readonly SettingsScrollThumb thumb = new SettingsScrollThumb();
+        int contentHeight, offset;
+        public int ContentHeight { get { return contentHeight; } set { contentHeight = Math.Max(0, value); LayoutContent(); } }
+        internal int ScrollOffset { get { return offset; } }
+        public override Rectangle DisplayRectangle { get { return new Rectangle(0, -offset, ClientSize.Width, Math.Max(ClientSize.Height, contentHeight)); } }
+        public SettingsScrollPanel()
+        {
+            DoubleBuffered = true; BackColor = Theme.Card; Controls.Add(Content); Controls.Add(thumb);
+            thumb.OffsetRequested += delegate(int value) { ScrollTo(value); };
+        }
+        void LayoutContent()
+        {
+            if (Content == null || thumb == null) return;
+            offset = Math.Max(0, Math.Min(offset, Math.Max(0, contentHeight - ClientSize.Height)));
+            Content.SetBounds(0, -offset, Math.Max(1, ClientSize.Width - 18), Math.Max(contentHeight, ClientSize.Height));
+            thumb.SetBounds(Math.Max(0, ClientSize.Width - 14), 0, 14, ClientSize.Height);
+            thumb.Visible = contentHeight > ClientSize.Height; thumb.SetMetrics(offset, contentHeight, ClientSize.Height);
+        }
+        public void ScrollTo(int value)
+        { int next = Math.Max(0, Math.Min(value, Math.Max(0, contentHeight - ClientSize.Height))); if (next == offset) return; offset = next; LayoutContent(); }
+        public void Reveal(Control control)
+        { if (control.Top < offset) ScrollTo(control.Top); else if (control.Bottom > offset + ClientSize.Height) ScrollTo(control.Bottom - ClientSize.Height); }
+        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); LayoutContent(); }
+        protected override void OnMouseWheel(MouseEventArgs e) { ScrollWheel(e); base.OnMouseWheel(e); }
+        void ScrollWheel(MouseEventArgs e)
+        { var handled = e as HandledMouseEventArgs; if (handled != null && handled.Handled) return; ScrollTo(offset - e.Delta * 48 / 120); if (handled != null) handled.Handled = true; }
+        public void AttachWheelHandlers() { AttachWheel(Content); }
+        void AttachWheel(Control parent)
+        {
+            parent.MouseWheel += delegate(object sender, MouseEventArgs e) { ScrollWheel(e); };
+            foreach (Control child in parent.Controls) AttachWheel(child);
+        }
+    }
+    sealed class SettingsScrollThumb : Control
+    {
+        int offset, total, viewport, dragOffset; bool dragging;
+        public event Action<int> OffsetRequested;
+        public SettingsScrollThumb() { BackColor = Theme.Card; AccessibleName = "Прокрутка настроек"; AccessibleRole = AccessibleRole.ScrollBar; TabStop = true; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        internal void SetMetrics(int value, int content, int visible) { offset = value; total = content; viewport = visible; Invalidate(); }
+        Rectangle ThumbBounds
+        {
+            get { int length = Math.Min(Height, Math.Max(24, total == 0 ? Height : Height * viewport / total)); int top = Math.Max(0, total <= viewport ? 0 : (Height - length) * offset / (total - viewport)); return new Rectangle(4, top, 6, length); }
+        }
+        void Request(int value) { if (OffsetRequested != null) OffsetRequested(Math.Max(0, Math.Min(Math.Max(0, total - viewport), value))); }
+        void DragTo(int y) { var bounds = ThumbBounds; Request((int)Math.Round((y - dragOffset) * (double)Math.Max(0, total - viewport) / Math.Max(1, Height - bounds.Height))); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button != MouseButtons.Left) return; Focus(); dragging = true; var bounds = ThumbBounds; dragOffset = bounds.Contains(e.Location) ? e.Y - bounds.Top : bounds.Height / 2; Capture = true; DragTo(e.Y); }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); if (dragging) DragTo(e.Y); }
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); if (e.Button == MouseButtons.Left) { dragging = false; Capture = false; } }
+        protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) dragging = false; }
+        protected override bool IsInputKey(Keys key) { return key == Keys.Up || key == Keys.Down || key == Keys.Home || key == Keys.End || key == Keys.PageUp || key == Keys.PageDown || base.IsInputKey(key); }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e); if (e.KeyCode == Keys.Home) Request(0); else if (e.KeyCode == Keys.End) Request(total);
+            else if (e.KeyCode == Keys.Up) Request(offset - 32); else if (e.KeyCode == Keys.Down) Request(offset + 32);
+            else if (e.KeyCode == Keys.PageUp) Request(offset - viewport); else if (e.KeyCode == Keys.PageDown) Request(offset + viewport); else return; e.Handled = true;
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var track = new Pen(Theme.Input, 3)) { track.StartCap = track.EndCap = LineCap.Round; e.Graphics.DrawLine(track, 7, 3, 7, Math.Max(3, Height - 3)); }
+            var bounds = ThumbBounds; if (bounds.Height < 2) return;
+            using (var path = Theme.Round(bounds, 3)) using (var brush = new SolidBrush(Theme.Accent)) e.Graphics.FillPath(brush, path);
+            if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, ClientRectangle, Theme.Muted, BackColor);
+        }
+    }
+    // No animation or polling: repaint only on input, commit only when editing ends.
+    sealed class ValueSlider : Control
+    {
+        int value, minimum, maximum = 100;
+        public event EventHandler ValueChanged, ValueCommitted;
+        public int Minimum { get { return minimum; } set { minimum = value; Value = this.value; } }
+        public int Maximum { get { return maximum; } set { maximum = value; Value = this.value; } }
+        public int Value { get { return value; } set { int next = Math.Max(minimum, Math.Min(maximum, value)); if (next == this.value) return; this.value = next; Invalidate(); if (ValueChanged != null) ValueChanged(this, EventArgs.Empty); } }
+        public ValueSlider() { Theme.Canvas(this); AccessibleRole = AccessibleRole.Slider; TabStop = true; Height = 28; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        void Pick(int x) { Value = minimum + (int)Math.Round((maximum - minimum) * Math.Max(0, Math.Min(1, (x - 9.0) / Math.Max(1, Width - 18)))); }
+        void Commit() { if (ValueCommitted != null) ValueCommitted(this, EventArgs.Empty); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button != MouseButtons.Left || !Enabled) return; Focus(); Capture = true; Pick(e.X); }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); if (Capture) Pick(e.X); }
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); if (e.Button == MouseButtons.Left && Capture) { Pick(e.X); Capture = false; Commit(); } }
+        protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) Commit(); }
+        protected override bool IsInputKey(Keys key) { return key == Keys.Left || key == Keys.Right || key == Keys.Up || key == Keys.Down || key == Keys.Home || key == Keys.End || base.IsInputKey(key); }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.Home) Value = minimum; else if (e.KeyCode == Keys.End) Value = maximum;
+            else if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Down) Value--; else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.Up) Value++; else return;
+            e.Handled = true;
+        }
+        protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); Commit(); }
+        protected override void OnLeave(EventArgs e) { base.OnLeave(e); Commit(); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float y = Height / 2f, x = 9 + (Width - 18) * (value - minimum) / (float)Math.Max(1, maximum - minimum);
+            using (var pen = new Pen(Theme.Input, 4)) e.Graphics.DrawLine(pen, 9, y, Width - 9, y);
+            if (x > 9) using (var pen = new Pen(Enabled ? Theme.Accent : Theme.Muted, 4)) e.Graphics.DrawLine(pen, 9, y, x, y);
+            using (var brush = new SolidBrush(Enabled ? Theme.Accent : Theme.Muted)) e.Graphics.FillEllipse(brush, x - 7, y - 7, 14, 14);
+            if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, ClientRectangle, Theme.Text, BackColor);
+        }
+    }
+    sealed class RangeBox : UserControl
+    {
+        readonly ValueSlider slider = new ValueSlider(); readonly NumberBox number = new NumberBox();
+        bool synchronizing; int committed;
+        public event EventHandler ValueCommitted;
+        public int Minimum { get { return slider.Minimum; } set { slider.Minimum = number.Minimum = value; } }
+        public int Maximum { get { return slider.Maximum; } set { slider.Maximum = number.Maximum = value; } }
+        public int Value { get { return number.Value; } set { synchronizing = true; slider.Value = number.Value = value; committed = number.Value; synchronizing = false; } }
+        public RangeBox()
+        {
+            Theme.Canvas(this); Height = 36; Controls.Add(slider); Controls.Add(number);
+            slider.ValueChanged += delegate { if (!synchronizing) { synchronizing = true; number.Value = slider.Value; synchronizing = false; } };
+            number.ValueChanged += delegate { if (!synchronizing) { synchronizing = true; slider.Value = number.Value; synchronizing = false; Commit(); } };
+            slider.ValueCommitted += delegate { Commit(); };
+        }
+        void Commit() { if (synchronizing || committed == number.Value) return; committed = number.Value; if (ValueCommitted != null) ValueCommitted(this, EventArgs.Empty); }
+        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); slider.SetBounds(0, 3, Math.Max(20, Width - 108), 30); number.SetBounds(Math.Max(20, Width - 100), 0, 100, 36); }
+        internal void SetInputName(string name) { AccessibleName = slider.AccessibleName = name; number.SetInputName(name); }
+        internal void EditForTest(int value) { slider.Value = value; Commit(); }
+    }
     sealed class NumberBox : UserControl
     {
         readonly TextBox editor = new TextBox();
@@ -25,9 +164,10 @@ namespace ReplayLite
             editor.Leave += delegate { Commit(); Invalidate(); }; editor.Enter += delegate { Invalidate(); };
         }
         void Commit() { int previous = value, parsed; if (int.TryParse(editor.Text, out parsed)) value = Math.Max(minimum, Math.Min(maximum, parsed)); string text = value.ToString(CultureInfo.InvariantCulture); if (editor.Text != text) editor.Text = text; if (previous != value && ValueChanged != null) ValueChanged(this, EventArgs.Empty); }
+        internal void SetInputName(string name) { AccessibleName = editor.AccessibleName = name; }
         protected override void OnSizeChanged(EventArgs e) { editor.SetBounds(12, Math.Max(3, (Height - editor.PreferredHeight) / 2), Math.Max(20, Width - 50), editor.PreferredHeight); base.OnSizeChanged(e); }
         protected override void OnMouseDown(MouseEventArgs e) { if (Enabled && e.Button == MouseButtons.Left) { if (e.X >= Width - 33) Value = Value + (e.Y < Height / 2 ? 1 : -1); else editor.Focus(); } base.OnMouseDown(e); }
-        protected override void OnMouseWheel(MouseEventArgs e) { if (ContainsFocus) Value = Value + Math.Sign(e.Delta); base.OnMouseWheel(e); }
+        protected override void OnMouseWheel(MouseEventArgs e) { bool inSettings = false; for (Control parent = Parent; parent != null; parent = parent.Parent) if (parent is SettingsScrollPanel) { inSettings = true; break; } if (ContainsFocus && !inSettings) Value = Value + Math.Sign(e.Delta); base.OnMouseWheel(e); }
         protected override void OnEnabledChanged(EventArgs e) { editor.ForeColor = Enabled ? Theme.Text : Theme.Muted; Invalidate(); base.OnEnabledChanged(e); }
         protected override void OnPaint(PaintEventArgs e)
         {

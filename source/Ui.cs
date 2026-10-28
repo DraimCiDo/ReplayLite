@@ -9,6 +9,7 @@ using System.Windows.Forms;
 
 namespace ReplayLite
 {
+    interface IAnimationPreference { bool AnimationsEnabled { get; } }
     static class Theme
     {
         public static readonly Color Background = Color.FromArgb(13, 17, 24), Card = Color.FromArgb(22, 28, 39), Input = Color.FromArgb(30, 38, 51);
@@ -23,7 +24,7 @@ namespace ReplayLite
         public static Color Mix(Color a, Color b, float t)
         { return Color.FromArgb((int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t)); }
         public static bool CanAnimate(Control c)
-        { var form = c.FindForm(); return c.Visible && form != null && form.Visible && form.WindowState != FormWindowState.Minimized; }
+        { var form = c.FindForm(); var preference = form as IAnimationPreference; return (preference == null || preference.AnimationsEnabled) && c.Visible && form != null && form.Visible && form.WindowState != FormWindowState.Minimized; }
         public static void Canvas(Control c)
         { c.Font = new Font("Segoe UI", 10); c.ForeColor = Text; c.BackColor = Card; }
     }
@@ -39,6 +40,7 @@ namespace ReplayLite
             base.OnPaint(e);
         }
     }
+    enum NavigationGlyph { None, Gear, Back }
     sealed class ActionButton : Button
     {
         readonly Timer tween = new Timer { Interval = 16 };
@@ -47,6 +49,8 @@ namespace ReplayLite
         Color fill = Theme.Input;
         bool hovered, pressed;
         public string Detail = "";
+        public NavigationGlyph Glyph = NavigationGlyph.None;
+        public bool AttentionDot = false;
         public Color Fill { get { return fill; } set { fill = value; Transition(); } }
         public bool Animating { get { return tween.Enabled; } }
         public ActionButton()
@@ -81,14 +85,36 @@ namespace ReplayLite
             using (var brush = new SolidBrush(current)) e.Graphics.FillPath(brush, path);
             var color = Enabled ? ForeColor : Color.FromArgb(133, 146, 165);
             const TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-            if (Detail.Length == 0) TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, color, flags);
+            if (Image != null) e.Graphics.DrawImage(Image, ClientRectangle);
+            else if (Glyph != NavigationGlyph.None) DrawNavigation(e.Graphics, color);
+            else if (Detail.Length == 0) TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, color, flags);
             else
             {
                 int y = Math.Max(4, (Height - 49) / 2);
                 TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(8, y, Width - 16, 25), color, flags);
                 using (var small = new Font("Segoe UI", 8.5f)) TextRenderer.DrawText(e.Graphics, Detail, small, new Rectangle(8, y + 26, Width - 16, 22), color, flags);
             }
+            if (AttentionDot) using (var dot = new SolidBrush(Theme.Accent)) e.Graphics.FillEllipse(dot, Width - 10, 2, 8, 8);
             if (Focused && ShowFocusCues) { using (var path = Theme.Round(new RectangleF(4, 4, Width - 8, Height - 8), 9)) using (var pen = new Pen(Theme.Blue)) e.Graphics.DrawPath(pen, path); }
+        }
+        void DrawNavigation(Graphics graphics, Color color)
+        {
+            float x = Width / 2f, y = Height / 2f;
+            using (var pen = new Pen(color, 1.8f))
+            {
+                pen.StartCap = pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
+                if (Glyph == NavigationGlyph.Back)
+                {
+                    using (var path = new GraphicsPath()) { path.AddBezier(x - 7, y - 5, x + 11, y - 8, x + 12, y + 11, x - 2, y + 9); graphics.DrawPath(pen, path); }
+                    graphics.DrawLines(pen, new[] { new PointF(x - 2, y - 10), new PointF(x - 8, y - 5), new PointF(x - 2, y) });
+                }
+                else
+                {
+                    var points = new PointF[32];
+                    for (int i = 0; i < points.Length; i++) { double angle = i * Math.PI / 16; float radius = (i % 4 == 0 || i % 4 == 3) ? 10 : 8; points[i] = new PointF(x + radius * (float)Math.Cos(angle), y + radius * (float)Math.Sin(angle)); }
+                    graphics.DrawPolygon(pen, points); graphics.DrawEllipse(pen, x - 3.5f, y - 3.5f, 7, 7);
+                }
+            }
         }
         protected override void Dispose(bool disposing) { if (disposing) tween.Dispose(); base.Dispose(disposing); }
     }
