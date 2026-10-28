@@ -61,3 +61,5 @@ Windows 11 Pro 10.0.26300, Ryzen 7 5700X / 16 логических CPU, 31.9 GiB
 [Параметры и ограничения](SETTINGS.md), [план](plans/settings-v0.4-review.md), [тёмная тема](../assets/docs/settings-v0.4-preview.png), [светлая тема](../assets/docs/theme-light-v0.4-preview.png).
 
 Предварительная сборка и исходники передаются для просмотра. Опубликованный 0.3.16 не заменён; версия 0.4.0 и GitHub Release — после одобрения пользователя.
+
+Исходный коммит: [c245150](https://github.com/DraimCiDo/ReplayLite/commit/c245150a1eae3b8074a40ff1c4829a42633a0fa9), push в main выполнен. [Проверка GitHub Actions](https://github.com/DraimCiDo/ReplayLite/actions/runs/40782572888). Предварительный ZIP: SHA-256 `99EA82FC08ACE52ABCB363035256BFE6F3F4B14462327D6B66A17AC6F18427DB`; EXE внутри совпадает с проверенной сборкой. После создания ZIP дополнены только записи о передаче в этом отчёте и плане.
