@@ -14,7 +14,7 @@ using System.Windows.Forms;
 
 namespace ReplayLite
 {
-    public sealed class Settings
+    public sealed partial class Settings
     {
         public int Seconds = 120, Fps = 30, Mbps = 8, Display = 0;
         public int DisplayAdapter, Rotation;
@@ -51,7 +51,7 @@ namespace ReplayLite
                         case "MonitorId": s.MonitorId = p[1]; break;
                         case "HotkeyModifiers": if (int.TryParse(p[1], out v)) s.Hotkey.Modifiers = (uint)v; break;
                         case "HotkeyKey": if (int.TryParse(p[1], out v)) s.Hotkey.Key = (Keys)v; break;
-                        case "Audio": if (new[] { "both", "system", "none" }.Contains(p[1])) s.Audio = p[1]; break;
+                        case "Audio": if (new[] { "both", "system", "microphone", "none" }.Contains(p[1])) s.Audio = p[1]; break;
                         case "SystemDevice": s.SystemDevice = p[1]; break;
                         case "MicrophoneDevice": s.MicrophoneDevice = p[1]; break;
                         case "SystemVolume": if (int.TryParse(p[1], out v)) s.SystemVolume = Math.Max(0, Math.Min(100, v)); break;
@@ -62,6 +62,7 @@ namespace ReplayLite
                         case "SaveNotification": if (bool.TryParse(p[1], out flag)) s.SaveNotification = flag; break;
                         case "SaveSound": if (bool.TryParse(p[1], out flag)) s.SaveSound = flag; break;
                         case "CaptureCursor": if (bool.TryParse(p[1], out flag)) s.CaptureCursor = flag; break;
+                        default: s.LoadPreference(p[0], p[1]); break;
                         case "BufferFolder": if (p[1].Length == 0) s.BufferFolder = ""; else if (ValidAbsolutePath(p[1])) s.BufferFolder = p[1]; break;
                         case "Folder": if (Path.IsPathRooted(p[1])) s.Folder = p[1]; else if (Portable) s.Folder = Deployment.Child(AppDomain.CurrentDomain.BaseDirectory, p[1]); break;
                     }
@@ -79,12 +80,13 @@ namespace ReplayLite
         internal void SaveToFile(string file)
         {
             if (!string.IsNullOrEmpty(BufferFolder) && !ValidAbsolutePath(BufferFolder)) throw new ArgumentException("Укажите абсолютный путь папки буфера.");
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
+            ValidatePreferences(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
             string target = file, pending = target + ".new";
             string storedFolder = Folder, appPrefix = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\') + "\\";
             if (Portable && Path.GetFullPath(Folder).StartsWith(appPrefix, StringComparison.OrdinalIgnoreCase)) storedFolder = Path.GetFullPath(Folder).Substring(appPrefix.Length);
             File.WriteAllLines(pending, new[] { "Seconds=" + Seconds, "Fps=" + Fps, "Mbps=" + Mbps, "Display=" + Display, "DisplayAdapter=" + DisplayAdapter, "MonitorId=" + MonitorId, "HotkeyModifiers=" + Hotkey.Modifiers, "HotkeyKey=" + (int)Hotkey.Key, "Audio=" + Audio, "Folder=" + storedFolder,
                 "SystemDevice=" + SystemDevice, "MicrophoneDevice=" + MicrophoneDevice, "SystemVolume=" + SystemVolume, "MicrophoneVolume=" + MicrophoneVolume, "BufferFolder=" + BufferFolder, "FreeSpaceMb=" + FreeSpaceMb, "StopWhenLowSpace=" + StopWhenLowSpace, "Animations=" + Animations, "SaveNotification=" + SaveNotification, "SaveSound=" + SaveSound, "CaptureCursor=" + CaptureCursor }, Encoding.UTF8);
+            File.AppendAllLines(pending, PreferenceLines(), Encoding.UTF8);
             if (File.Exists(target)) File.Replace(pending, target, null); else File.Move(pending, target);
         }
     }
@@ -218,8 +220,9 @@ namespace ReplayLite
         public bool Running { get { return process != null && !process.HasExited && !stopping; } }
         public double CpuSeconds { get { try { return process.TotalProcessorTime.TotalSeconds; } catch { return 0; } } }
         public long Memory { get { try { process.Refresh(); return process.WorkingSet64; } catch { return 0; } } }
-        public long DiskBytes { get { lock (gate) { return session == null || !Directory.Exists(session) ? 0 : Directory.GetFiles(session, "*.ts").Sum(p => new FileInfo(p).Length); } } }
-        public int SegmentCount { get { lock (gate) { return session == null || !Directory.Exists(session) ? 0 : Directory.GetFiles(session, "s*.ts").Length; } } }
+        public long DiskBytes { get { lock (gate) { return session == null || !Directory.Exists(session) ? 0 : Directory.GetFiles(session, "*" + SegmentExtension).Sum(p => new FileInfo(p).Length); } } }
+        string SegmentExtension { get { return Config.Codec == "av1" ? ".mkv" : ".ts"; } }
+        public int SegmentCount { get { lock (gate) { return session == null || !Directory.Exists(session) ? 0 : Directory.GetFiles(session, "s*" + SegmentExtension).Length; } } }
         public long[] AudioBytes { get { return audio.Select(a => a.CapturedBytes).ToArray(); } }
         public bool AudioDegraded { get { return audio.Any(a => !a.Available); } }
         public string AudioSummary
@@ -291,20 +294,21 @@ namespace ReplayLite
                     Config.DisplayAdapter = monitor.Adapter; Config.Display = monitor.Output; Config.Rotation = monitor.Rotation; captureMonitor = monitor.Handle;
                     if (graphicsCapture && captureMonitor == IntPtr.Zero) throw new CaptureUnavailableException("Windows не вернула дескриптор выбранного монитора.");
                 }
-                if (Config.Audio != "none") audio.Add(new AudioPipe(true, Config.SystemDevice, Config.SystemVolume));
-                if (Config.Audio == "both") audio.Add(new AudioPipe(false, Config.MicrophoneDevice, Config.MicrophoneVolume));
+                Config.ValidatePreferences();
+                if (Config.Audio == "both" || Config.Audio == "system") audio.Add(new AudioPipe(true, Config.SystemDevice, Config.SystemVolume));
+                if (Config.Audio == "both" || Config.Audio == "microphone") audio.Add(new AudioPipe(false, Config.MicrophoneDevice, Config.MicrophoneVolume));
                 foreach (var a in audio) a.Start();
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture" };
                 foreach (var a in audio) args.AddRange(new[] { "-thread_queue_size", "32", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", a.InputPath });
                 string graph = graphicsCapture
-                    ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=" + (Config.CaptureCursor ? "1" : "0") + ":display_border=0[v]"
-                    : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=" + (Config.CaptureCursor ? "1" : "0") + "[v]";
+                    ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=" + (Config.CaptureCursor ? "1" : "0") + ":display_border=0" + Config.ScaleFilter + "[v]"
+                    : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=" + (Config.CaptureCursor ? "1" : "0") + Config.ScaleFilter + "[v]";
                 if (audio.Count == 2) graph += ";[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:latency=1[a]";
-                args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-force_key_frames", "expr:gte(t,n_forced*2)", "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-enc_time_base:v", "1:" + Config.Fps.ToString(CultureInfo.InvariantCulture), "-fps_mode", "vfr" });
+                args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", Config.Codec + "_nvenc", "-preset", "p1", "-tune", "ll", "-rc", Config.RateControl, "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-force_key_frames", "expr:gte(t,n_forced*2)", "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-enc_time_base:v", "1:" + Config.Fps.ToString(CultureInfo.InvariantCulture), "-fps_mode", "vfr" });
                 if (audio.Count == 2) args.AddRange(new[] { "-map", "[a]" });
                 else if (audio.Count == 1) args.AddRange(new[] { "-map", "0:a" });
                 if (audio.Count > 0) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k", "-threads:a", "1" });
-                args.AddRange(new[] { "-f", "segment", "-segment_format", "mpegts", "-segment_time", "2", "-segment_start_number", nextSegmentNumber.ToString(CultureInfo.InvariantCulture), "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d.ts" });
+                args.AddRange(new[] { "-f", "segment", "-segment_format", Config.Codec == "av1" ? "matroska" : "mpegts", "-segment_time", "2", "-segment_start_number", nextSegmentNumber.ToString(CultureInfo.InvariantCulture), "-segment_list", "segments.csv", "-segment_list_type", "csv", "-segment_list_size", ((Config.Seconds / 2) + 4).ToString(), "-segment_list_flags", "+live", "-reset_timestamps", "1", "s%09d" + SegmentExtension });
                 token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
                 process = captureLauncher == null ? Launch(ffmpeg, args, session, Log) : captureLauncher(args, session, Log);
                 launched = true;
@@ -325,6 +329,7 @@ namespace ReplayLite
             if (!(startupError is OperationCanceledException))
             {
                 string diagnostic = startupError.Message + "\n" + ErrorLog;
+                if (CaptureRecovery.UnsupportedEncoder(diagnostic)) throw new IOException("Видеокарта или драйвер не поддерживает выбранный кодек " + Config.Codec.ToUpperInvariant() + ". Выберите другой кодек в настройках видео.\n" + diagnostic, startupError);
                 if (startupError is TimeoutException) throw new TimeoutException(diagnostic, startupError);
                 if (launched || startupError is CaptureUnavailableException) throw new CaptureUnavailableException(diagnostic, startupError);
                 throw new IOException(diagnostic, startupError);
@@ -351,7 +356,7 @@ namespace ReplayLite
                         var p = line.Split(','); double start, end;
                         if (p.Length != 3 || !double.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out start) || !double.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out end)) continue;
                         var name = p[0].Trim('"');
-                        if (end > start && (savedLastSegment == null || string.CompareOrdinal(name, savedLastSegment) > 0) && Path.GetFileName(name) == name && name.StartsWith("s") && name.EndsWith(".ts") && File.Exists(Path.Combine(session, name))) result.Add(new Segment { Name = name, Start = start + timestampOffset, End = end + timestampOffset });
+                        if (end > start && (savedLastSegment == null || string.CompareOrdinal(name, savedLastSegment) > 0) && Path.GetFileName(name) == name && name.StartsWith("s") && name.EndsWith(SegmentExtension) && File.Exists(Path.Combine(session, name))) result.Add(new Segment { Name = name, Start = start + timestampOffset, End = end + timestampOffset });
                     }
                 }
             }
@@ -382,7 +387,7 @@ namespace ReplayLite
                     // WGC may legitimately wait on a static desktop; DDA is configured to produce regular frames.
                     if (!graphicsCapture && lastProgressTick != 0 && (Stopwatch.GetTimestamp() - lastProgressTick) / (double)Stopwatch.Frequency >= 15)
                         captureFault = "Захват не выдаёт новые видеосегменты более 15 секунд.";
-                    var all = Directory.GetFiles(session, "s*.ts").OrderBy(p => p, StringComparer.Ordinal).ToArray();
+                    var all = Directory.GetFiles(session, "s*" + SegmentExtension).OrderBy(p => p, StringComparer.Ordinal).ToArray();
                     int keep = Config.Seconds / 2 + 5;
                     retainedSegments.RemoveAll(s => (savedLastSegment != null && string.CompareOrdinal(s.Name, savedLastSegment) <= 0) || !File.Exists(Path.Combine(session, s.Name)));
                     for (int i = 0; i < all.Length; i++)
@@ -439,10 +444,10 @@ namespace ReplayLite
                     }
                     File.WriteAllLines(Path.Combine(snapshot, "list.ffconcat"), list, new UTF8Encoding(false));
                 }
-                output = Path.Combine(Config.Folder, "Replay-" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff") + ".mp4");
-                partial = output + ".partial.mp4";
+                output = Config.ClipPath(DateTime.Now);
+                partial = output + ".partial." + Config.Container;
                 var log = new StringBuilder();
-                using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-display_rotation:v:0", OutputRotation.ToString(CultureInfo.InvariantCulture), "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", partial }, snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
+                using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-display_rotation:v:0", OutputRotation.ToString(CultureInfo.InvariantCulture), "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc" }.Concat(Config.Container == "mp4" ? new[] { "-movflags", "+faststart" } : new string[0]).Concat(new[] { partial }).ToArray(), snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
                 {
                     await Task.Run(delegate { if (!remux.WaitForExit(60000)) { remux.Kill(); remux.WaitForExit(); throw new TimeoutException("Сохранение заняло больше минуты."); } remux.WaitForExit(); });
                     if (remux.ExitCode != 0) throw new IOException("Не удалось сохранить повтор.\n" + log);
@@ -454,7 +459,7 @@ namespace ReplayLite
                     // Commit the boundary only after the MP4 has its final name. Keep anything captured during export.
                     try
                     {
-                        if (session != null) foreach (var path in Directory.GetFiles(session, "s*.ts"))
+                        if (session != null) foreach (var path in Directory.GetFiles(session, "s*" + SegmentExtension))
                             if (string.CompareOrdinal(Path.GetFileName(path), savedLastSegment) <= 0) TryDeleteConsumed(path);
                     }
                     catch (IOException) { } catch (UnauthorizedAccessException) { }
@@ -483,7 +488,7 @@ namespace ReplayLite
                     var completed = ReadSegments();
                     retainedSegments.Clear(); retainedSegments.AddRange(completed);
                     timestampOffset = completed.Count == 0 ? 0 : completed.Last().End;
-                    foreach (var path in Directory.GetFiles(session, "s*.ts"))
+                    foreach (var path in Directory.GetFiles(session, "s*" + SegmentExtension))
                     {
                         string name = Path.GetFileNameWithoutExtension(path); int number;
                         if (int.TryParse(name.Substring(1), out number)) nextSegmentNumber = Math.Max(nextSegmentNumber, number + 1);
@@ -618,6 +623,7 @@ namespace ReplayLite
         static int Main(string[] args)
         {
             Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+            if (args.Length == 2 && args[0] == "--preferences-hardware-test") return PreferencesTests.Hardware(args[1]).GetAwaiter().GetResult();
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--audio-test") return AudioRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
@@ -663,7 +669,8 @@ namespace ReplayLite
             }
             using (var singleton = new Mutex(true, "Local\\ReplayLite.Main", out SingletonCreated))
             {
-                bool launchInTray = Array.IndexOf(args, "--startup") >= 0;
+                bool automaticCapture = Array.IndexOf(args, "--startup") >= 0;
+                bool launchInTray = automaticCapture || Settings.Load().StartMinimized;
                 if (!SingletonCreated) { if (!launchInTray) MessageBox.Show("ReplayLite уже запущен. Открой его из трея."); return 0; }
                 using (var form = new MainForm(launchInTray))
                 {
@@ -672,7 +679,7 @@ namespace ReplayLite
                     {
                         form.FormClosed += delegate { Application.ExitThread(); };
                         var handle = form.Handle;
-                        form.BeginInvoke(new Action(async delegate { await form.StartInBackgroundAsync(); }));
+                        form.BeginInvoke(new Action(async delegate { await form.StartInBackgroundAsync(automaticCapture); }));
                         Application.Run();
                     }
                 }

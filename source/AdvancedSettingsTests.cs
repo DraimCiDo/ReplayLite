@@ -18,6 +18,7 @@ namespace ReplayLite
         }
         internal static async Task VerifyBehaviorAsync(StringBuilder report)
         {
+            await PreferencesTests.UnsupportedCodec(report);
             foreach (int volume in new[] { 0, 50, 100 })
                 using (var pipe = new AudioPipe(true, s => new ConstantAudio(), null, 100, volume))
                 using (var reader = new NamedPipeClientStream(".", pipe.Name, PipeDirection.In, PipeOptions.Asynchronous))
@@ -67,7 +68,7 @@ namespace ReplayLite
         internal static void Run(StringBuilder report)
         {
             string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".deps-cache", "advanced-settings-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(root); string file = Path.Combine(root, "settings.txt");
+            Directory.CreateDirectory(root); PreferencesTests.Configuration(report, Path.Combine(root, "new-preferences")); string file = Path.Combine(root, "settings.txt");
             var config = new Settings { SystemDevice = "render=id", MicrophoneDevice = "capture=id", SystemVolume = 55, MicrophoneVolume = 0, FreeSpaceMb = 512, StopWhenLowSpace = false, BufferFolder = Path.Combine(root, "Буфер с пробелами"), Animations = false, SaveNotification = false, SaveSound = true, CaptureCursor = false };
             config.SaveToFile(file); var loaded = Settings.LoadFromFile(file);
             if (loaded.SystemDevice != config.SystemDevice || loaded.MicrophoneDevice != config.MicrophoneDevice || loaded.SystemVolume != 55 || loaded.MicrophoneVolume != 0 || loaded.BufferHome != config.BufferFolder || loaded.FreeSpaceMb != 512 || loaded.StopWhenLowSpace || loaded.Animations || loaded.SaveNotification || !loaded.SaveSound || loaded.CaptureCursor) throw new Exception("Advanced settings round-trip failed.");

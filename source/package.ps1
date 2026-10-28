@@ -77,6 +77,6 @@ try {
     foreach ($required in @('ReplayLite/ReplayLite.exe','ReplayLite/NAudio.dll','ReplayLite/bin/ffmpeg.exe','ReplayLite/bin/ffprobe.exe','ReplayLite/licenses/NAudio-Ms-PL.txt','ReplayLite/third-party-source/FFmpeg-946fcce07b.zip')) {
         if ($entries -notcontains $required) { throw "Package missing: $required" }
     }
-    if ($entries -match '/(\.git|\.deps-cache)/|\.(mp4|ts)$') { throw 'Private or temporary files in package' }
+    if ($entries -match '/(\.git|\.deps-cache)/|\.(mp4|mkv|ts)$') { throw 'Private or temporary files in package' }
 } finally { $zip.Dispose() }
 Write-Output "Package verified: $zipPath"

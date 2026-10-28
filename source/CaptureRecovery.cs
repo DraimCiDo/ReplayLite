@@ -10,6 +10,12 @@ namespace ReplayLite
     }
     static class CaptureRecovery
     {
+        internal static bool UnsupportedEncoder(string message)
+        {
+            if (string.IsNullOrEmpty(message) || IsTransient(message)) return false;
+            string text = message.ToLowerInvariant();
+            return text.Contains("_nvenc") && (text.Contains("codec not supported") || text.Contains("doesn't support required nvenc features") || text.Contains("driver does not support the required nvenc api version"));
+        }
         internal static bool IsTransient(string message)
         {
             if (string.IsNullOrEmpty(message)) return false;

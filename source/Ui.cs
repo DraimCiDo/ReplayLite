@@ -12,9 +12,21 @@ namespace ReplayLite
     interface IAnimationPreference { bool AnimationsEnabled { get; } }
     static class Theme
     {
-        public static readonly Color Background = Color.FromArgb(13, 17, 24), Card = Color.FromArgb(22, 28, 39), Input = Color.FromArgb(30, 38, 51);
-        public static readonly Color Border = Color.FromArgb(43, 53, 69), Text = Color.FromArgb(239, 244, 251), Muted = Color.FromArgb(143, 159, 181);
-        public static readonly Color Accent = Color.FromArgb(76, 224, 178), Blue = Color.FromArgb(113, 168, 255), Red = Color.FromArgb(255, 131, 139);
+        public static Color Background = Color.FromArgb(13, 17, 24), Card = Color.FromArgb(22, 28, 39), Input = Color.FromArgb(30, 38, 51);
+        public static Color Border = Color.FromArgb(43, 53, 69), Text = Color.FromArgb(239, 244, 251), Muted = Color.FromArgb(143, 159, 181);
+        public static Color Accent = Color.FromArgb(76, 224, 178), Blue = Color.FromArgb(113, 168, 255), Red = Color.FromArgb(255, 131, 139);
+        public static void SetPalette(string name)
+        {
+            bool light = name == "light";
+            Background = light ? Color.FromArgb(236, 241, 246) : Color.FromArgb(13, 17, 24);
+            Card = light ? Color.White : Color.FromArgb(22, 28, 39);
+            Input = light ? Color.FromArgb(225, 233, 242) : Color.FromArgb(30, 38, 51);
+            Border = light ? Color.FromArgb(194, 205, 219) : Color.FromArgb(43, 53, 69);
+            Text = light ? Color.FromArgb(24, 35, 49) : Color.FromArgb(239, 244, 251);
+            Muted = light ? Color.FromArgb(76, 95, 117) : Color.FromArgb(143, 159, 181);
+            Accent = name == "ocean" ? Color.FromArgb(88, 181, 245) : name == "violet" ? Color.FromArgb(186, 157, 250) : light ? Color.FromArgb(20, 157, 119) : Color.FromArgb(76, 224, 178);
+            Red = light ? Color.FromArgb(177, 43, 64) : Color.FromArgb(255, 131, 139);
+        }
         public static GraphicsPath Round(RectangleF r, float radius)
         {
             float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height)); var path = new GraphicsPath();
@@ -40,7 +52,7 @@ namespace ReplayLite
             base.OnPaint(e);
         }
     }
-    enum NavigationGlyph { None, Gear, Back }
+    enum NavigationGlyph { None, Gear, Back, Monitor, Folder, Video, Audio, Keyboard, Windows }
     sealed class ActionButton : Button
     {
         readonly Timer tween = new Timer { Interval = 16 };
@@ -66,7 +78,7 @@ namespace ReplayLite
         }
         void Transition()
         {
-            target = !Enabled ? Color.FromArgb(37, 44, 57) : pressed ? Theme.Mix(fill, Color.Black, 0.12f) : hovered ? Theme.Mix(fill, Color.White, 0.13f) : fill;
+            target = !Enabled ? Theme.Mix(Theme.Input, Theme.Card, .4f) : pressed ? Theme.Mix(fill, Color.Black, 0.12f) : hovered ? Theme.Mix(fill, Color.White, 0.13f) : fill;
             if (!Theme.CanAnimate(this) || current == target) { FinishAnimation(); return; }
             from = current; clock.Restart(); tween.Start();
         }
@@ -83,7 +95,7 @@ namespace ReplayLite
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(new RectangleF(1, 1, Width - 2, Height - 2), 12))
             using (var brush = new SolidBrush(current)) e.Graphics.FillPath(brush, path);
-            var color = Enabled ? ForeColor : Color.FromArgb(133, 146, 165);
+            var color = Enabled ? ForeColor : Theme.Muted;
             const TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
             if (Image != null) e.Graphics.DrawImage(Image, ClientRectangle);
             else if (Glyph != NavigationGlyph.None) DrawNavigation(e.Graphics, color);
@@ -108,6 +120,18 @@ namespace ReplayLite
                     using (var path = new GraphicsPath()) { path.AddBezier(x - 7, y - 5, x + 11, y - 8, x + 12, y + 11, x - 2, y + 9); graphics.DrawPath(pen, path); }
                     graphics.DrawLines(pen, new[] { new PointF(x - 2, y - 10), new PointF(x - 8, y - 5), new PointF(x - 2, y) });
                 }
+                else if (Glyph == NavigationGlyph.Monitor)
+                { graphics.DrawRectangle(pen, x - 10, y - 8, 20, 13); graphics.DrawLine(pen, x, y + 5, x, y + 9); graphics.DrawLine(pen, x - 5, y + 10, x + 5, y + 10); }
+                else if (Glyph == NavigationGlyph.Folder)
+                { graphics.DrawPolygon(pen, new[] { new PointF(x - 10, y - 7), new PointF(x - 3, y - 7), new PointF(x, y - 4), new PointF(x + 10, y - 4), new PointF(x + 10, y + 8), new PointF(x - 10, y + 8) }); }
+                else if (Glyph == NavigationGlyph.Video)
+                { graphics.DrawRectangle(pen, x - 10, y - 7, 13, 14); graphics.DrawPolygon(pen, new[] { new PointF(x + 3, y - 3), new PointF(x + 10, y - 7), new PointF(x + 10, y + 7), new PointF(x + 3, y + 3) }); }
+                else if (Glyph == NavigationGlyph.Audio)
+                { graphics.DrawArc(pen, x - 9, y - 9, 18, 20, 180, 180); graphics.DrawRectangle(pen, x - 10, y, 4, 8); graphics.DrawRectangle(pen, x + 6, y, 4, 8); }
+                else if (Glyph == NavigationGlyph.Keyboard)
+                { graphics.DrawRectangle(pen, x - 11, y - 7, 22, 14); for (int row = 0; row < 2; row++) for (int col = 0; col < 5; col++) graphics.DrawLine(pen, x - 7 + col * 3.5f, y - 3 + row * 4, x - 6 + col * 3.5f, y - 3 + row * 4); graphics.DrawLine(pen, x - 4, y + 5, x + 4, y + 5); }
+                else if (Glyph == NavigationGlyph.Windows)
+                { for (int row = 0; row < 2; row++) for (int col = 0; col < 2; col++) graphics.DrawRectangle(pen, x - 9 + col * 11, y - 9 + row * 11, 7, 7); }
                 else
                 {
                     var points = new PointF[32];
@@ -257,7 +281,7 @@ namespace ReplayLite
     }
     sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
     {
-        internal static readonly Color Selection = Color.FromArgb(45, 58, 76);
+        internal static Color Selection { get { return Theme.Mix(Theme.Input, Theme.Accent, .13f); } }
         public DarkMenuRenderer() { RoundedEdges = false; }
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e) { e.Graphics.Clear(Theme.Input); }
         protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) { using (var brush = new SolidBrush(Theme.Input)) e.Graphics.FillRectangle(brush, e.AffectedBounds); }

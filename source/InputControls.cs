@@ -7,6 +7,28 @@ using System.Windows.Forms;
 
 namespace ReplayLite
 {
+    sealed class TextField : UserControl
+    {
+        readonly TextBox editor = new TextBox { BorderStyle = BorderStyle.None, MaxLength = 100 };
+        public override string Text { get { return editor == null ? "" : editor.Text; } set { if (editor != null) editor.Text = value; } }
+        public int MaxLength { get { return editor.MaxLength; } set { editor.MaxLength = value; } }
+        public TextField()
+        {
+            Theme.Canvas(this); TabStop = false; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            editor.BackColor = Theme.Input; editor.ForeColor = Theme.Text; Controls.Add(editor);
+            editor.TextChanged += delegate { OnTextChanged(EventArgs.Empty); }; editor.KeyDown += delegate(object sender, KeyEventArgs e) { OnKeyDown(e); };
+        }
+        protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); if (editor != null) { editor.Font = Font; LayoutEditor(); } }
+        protected override void OnForeColorChanged(EventArgs e) { base.OnForeColorChanged(e); if (editor != null) editor.ForeColor = ForeColor; }
+        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); LayoutEditor(); }
+        void LayoutEditor() { if (editor != null) editor.SetBounds(10, Math.Max(3, (Height - editor.PreferredHeight) / 2), Math.Max(1, Width - 20), editor.PreferredHeight); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 9))
+            using (var fill = new SolidBrush(Theme.Input)) using (var line = new Pen(Theme.Border)) { e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(line, path); }
+        }
+    }
     sealed class PathDisplay : Control
     {
         readonly Bitmap folderIcon = MenuIcons.Draw(16, MenuGlyph.Folder);
