@@ -42,6 +42,8 @@ jobs:
         run: ./source/build.ps1
       - name: Check EXE version and UI
         run: ./source/check-build.ps1
+      - name: Check library and embedded playback without GPU
+        run: ./source/check-library.ps1
       - name: Check replay buffer reset without GPU
         run: ./source/check-buffer.ps1
       - name: Check audio disconnect and recovery without devices

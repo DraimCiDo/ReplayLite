@@ -217,7 +217,7 @@ namespace ReplayLite
             Recolor(this, before, after); RebuildBranding(); WindowTheme.Apply(this);
             save.Fill = Theme.Accent; save.ForeColor = Theme.AccentText;
             badge.Set(badge.Text, trayState == TrayState.Recording ? Theme.Accent : trayState == TrayState.Saving ? Theme.Blue : trayState == TrayState.Error ? Theme.Red : Theme.Muted); badge.FinishAnimation();
-            SyncActions(); if (advancedOptions != null) SelectSettingsTab(settingsTab); Invalidate(true);
+            SyncActions(); if (advancedOptions != null && !libraryOpen) SelectSettingsTab(settingsTab); Invalidate(true);
         }
         static Color MapColor(Color value, Color[] before, Color[] after) { for (int i = 0; i < before.Length; i++) if (value.ToArgb() == before[i].ToArgb()) return after[i]; return value; }
         static void Recolor(Control root, Color[] before, Color[] after)

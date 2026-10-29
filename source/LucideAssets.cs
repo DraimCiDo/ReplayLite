@@ -10,7 +10,7 @@ namespace ReplayLite
 {
     static class LucideAssets
     {
-        static readonly string[] Names = { "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left", "external-link", "save", "circle", "log-out", "circle-question-mark", "chevron-down", "chevron-up", "square-play", "pause", "circle-alert", "arrow-up", "check", "download", "x", "minus", "globe", "circle-dot" };
+        static readonly string[] Names = { "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left", "external-link", "save", "circle", "log-out", "circle-question-mark", "chevron-down", "chevron-up", "square-play", "pause", "circle-alert", "arrow-up", "check", "download", "x", "minus", "globe", "circle-dot", "copy", "trash" };
         static readonly Bitmap Atlas = Load();
         static readonly Dictionary<string, Bitmap> Cache = new Dictionary<string, Bitmap>();
         static Bitmap Load() { using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ReplayLite.Lucide.png")) { if (stream == null) throw new InvalidDataException("Missing embedded Lucide atlas."); using (var source = new Bitmap(stream)) return new Bitmap(source); } }

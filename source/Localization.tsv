@@ -305,3 +305,33 @@ CBR держит примерно постоянный поток данных. 
 Выберите микрофон для записи голоса. Если он отключится, видео продолжится без него до подключения.	Choose the microphone for voice recording. If it disconnects, video continues without it until it returns.
 Проверять обновления автоматически	Check for updates automatically
 Проверяет GitHub при запуске и раз в 5 минут. Кнопка подсветится, когда найдётся новая версия. Установка — по нажатию.	Checks GitHub on startup and every 5 minutes. The button lights up when a new version is found. Installation starts only when you choose it.
+Повторы	Replays
+Смотреть	Play
+Показать в папке	Show in folder
+Копировать путь	Copy path
+В корзину	Recycle
+Загружаем превью…	Loading preview…
+Превью недоступно	Preview unavailable
+Открыть папку	Open folder
+Обновить	Refresh
+Далее	Next
+Читаем папку повторов…	Reading replay folder…
+Повторов пока нет. Сохраните первый клип.	No replays yet. Save your first clip.
+Клипы {0}–{1} из {2}	Clips {0}–{1} of {2}
+\u0020· показана часть папки	\u0020· showing part of the folder
+Клип изменён или удалён. Обновите список.	The clip was changed or removed. Refresh the list.
+Не удалось открыть папку:\u0020	Could not open the folder:\u0020
+Не удалось прочитать видео.	Could not read the video.
+Видео не ответило вовремя.	The video did not respond in time.
+Превышен размер данных предпросмотра.	Preview data limit exceeded.
+Пауза	Pause
+Воспроизвести	Play
+Позиция воспроизведения	Playback position
+Громкость плеера	Player volume
+Открываем видео…	Opening video…
+Аппаратный просмотр недоступен, используем CPU.	Hardware playback is unavailable; using the CPU.
+Звук плеера недоступен:\u0020	Player audio is unavailable:\u0020
+Не удалось воспроизвести видео:\u0020	Could not play the video:\u0020
+Этот файл нельзя безопасно отправить в корзину.	This file cannot be safely sent to the Recycle Bin.
+Не удалось отправить клип в корзину.	Could not send the clip to the Recycle Bin.
+Отправить клип в корзину?\n	Send this clip to the Recycle Bin?\n

@@ -20,7 +20,8 @@ namespace ReplayLite
             foreach (var select in new[] { duration, fps, sound, display, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) if (select != null) select.SelectedIndex = select.SelectedIndex;
             badge.Set(L.T(L.Canonical(badge.Text)), trayState == TrayState.Recording ? Theme.Accent : trayState == TrayState.Saving ? Theme.Blue : trayState == TrayState.Error ? Theme.Red : Theme.Muted);
             SetTrayCaption(trayCaption); UpdateOptionsSummary(); SetAvailableRelease(availableRelease);
-            if (advancedOptions != null) SelectSettingsTab(settingsTab);
+            if (libraryOpen) { pageHeading.Text = player == null ? L.T("Повторы") : player.Filename; if (player == null) libraryLoading = LoadLibraryPage(); else player.RefreshLanguage(); }
+            else if (advancedOptions != null) SelectSettingsTab(settingsTab);
         }
     }
 }

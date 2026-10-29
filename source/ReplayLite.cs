@@ -629,6 +629,17 @@ namespace ReplayLite
             if (args.Length == 2 && args[0] == "--audio-test") return AudioRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--capture-recovery-test") return CaptureRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
+            if (args.Length == 2 && args[0] == "--library-test")
+            {
+                Directory.CreateDirectory(args[1]); string report = Path.Combine(args[1], "library-test.txt");
+                Application.ThreadException += delegate(object sender, System.Threading.ThreadExceptionEventArgs error) { File.AppendAllText(report, error.Exception.ToString()); Application.ExitThread(); };
+                AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs error) { File.AppendAllText(report, Convert.ToString(error.ExceptionObject)); };
+                using (var form = new MainForm(false, true))
+                {
+                    int exitCode = 1; form.Shown += async delegate { try { await form.VerifyLibraryAsync(args[1]); exitCode = 0; } catch (Exception error) { if (!File.Exists(report)) File.WriteAllText(report, error.ToString()); } finally { Application.ExitThread(); } };
+                    Application.Run(form); return exitCode;
+                }
+            }
             if (args.Length == 2 && (args[0] == "--startup-test" || args[0] == "--capture-recovery-live-test"))
             {
                 Directory.CreateDirectory(args[1]);

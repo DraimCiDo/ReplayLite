@@ -17,8 +17,10 @@ namespace ReplayLite
         public static Color Border = Color.FromArgb(43, 53, 69), Text = Color.FromArgb(239, 244, 251), Muted = Color.FromArgb(143, 159, 181);
         public static Color Accent = Color.FromArgb(76, 224, 178), Blue = Color.FromArgb(113, 168, 255), Red = Color.FromArgb(255, 131, 139);
         public static Color AccentText = Color.FromArgb(20, 33, 29);
+        public static string PaletteName = "mint";
         public static void SetPalette(string name)
         {
+            PaletteName = name;
             bool light = name == "light";
             bool ocean = name == "ocean", violet = name == "violet";
             Background = light ? Color.FromArgb(238, 239, 234) : ocean ? Color.FromArgb(18, 26, 35) : violet ? Color.FromArgb(25, 23, 34) : Color.FromArgb(18, 26, 27);
@@ -63,6 +65,49 @@ namespace ReplayLite
             if (HelpIcon) { int width = TextRenderer.MeasureText(e.Graphics, Text, Font, new Size(bounds.Width, Height), flags).Width; LucideAssets.Draw(e.Graphics, "circle-question-mark", new Rectangle(Math.Min(bounds.Width + 4, width + 5), (Height - 14) / 2, 14, 14), Theme.Muted); }
         }
     }
+    sealed class BrandTitle : Control
+    {
+        readonly Font versionFont = new Font("Segoe UI", 8);
+        public string VersionText = "";
+        internal Rectangle TitleBounds { get; private set; }
+        internal Rectangle VersionBounds { get; private set; }
+        internal int LastLetterCenter { get; private set; }
+        string metricsKey; Rectangle titleInk, versionInk; int lastLetterWidth;
+        public BrandTitle() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+            var title = TextRenderer.MeasureText(e.Graphics, Text, Font, new Size(int.MaxValue, int.MaxValue), flags);
+            var version = TextRenderer.MeasureText(e.Graphics, VersionText, versionFont, new Size(int.MaxValue, int.MaxValue), flags);
+            string key = Text + VersionText + Font.ToString() + e.Graphics.DpiX + ":" + e.Graphics.DpiY;
+            if (metricsKey != key)
+            {
+                metricsKey = key; titleInk = Ink(Text, Font, title, e.Graphics.DpiX, e.Graphics.DpiY); versionInk = Ink(VersionText, versionFont, version, e.Graphics.DpiX, e.Graphics.DpiY);
+                lastLetterWidth = Ink(Text.Length == 0 ? "e" : Text.Substring(Text.Length - 1), Font, title, e.Graphics.DpiX, e.Graphics.DpiY).Width;
+            }
+            int gap = Math.Max(1, (int)Math.Round(e.Graphics.DpiY / 96f));
+            int titleY = (int)Math.Round(Height * 33 / 64f - titleInk.Y - titleInk.Height / 2f);
+            TitleBounds = new Rectangle(titleInk.X, titleY + titleInk.Y, titleInk.Width, titleInk.Height);
+            LastLetterCenter = TitleBounds.Right - lastLetterWidth / 2;
+            int versionX = LastLetterCenter - versionInk.Width / 2 - versionInk.X, versionY = TitleBounds.Top - gap - versionInk.Bottom;
+            VersionBounds = new Rectangle(versionX + versionInk.X, versionY + versionInk.Y, versionInk.Width, versionInk.Height);
+            TextRenderer.DrawText(e.Graphics, VersionText, versionFont, new Rectangle(versionX, versionY, version.Width + 4, version.Height + 4), Theme.Muted, flags);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(0, titleY, Width, title.Height + 4), ForeColor, flags | TextFormatFlags.EndEllipsis);
+        }
+        static Rectangle Ink(string text, Font font, Size size, float dpiX, float dpiY)
+        {
+            using (var image = new Bitmap(Math.Max(4, size.Width + 8), Math.Max(4, size.Height + 8)))
+            {
+                image.SetResolution(dpiX, dpiY); using (var graphics = Graphics.FromImage(image)) { graphics.Clear(Color.Black); TextRenderer.DrawText(graphics, text, font, new Point(0, 0), Color.White, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix); }
+                int left = image.Width, top = image.Height, right = -1, bottom = -1;
+                for (int y = 0; y < image.Height; y++) for (int x = 0; x < image.Width; x++) { Color pixel = image.GetPixel(x, y); if (pixel.R > 32 || pixel.G > 32 || pixel.B > 32) { left = Math.Min(left, x); top = Math.Min(top, y); right = Math.Max(right, x); bottom = Math.Max(bottom, y); } }
+                return right < left ? Rectangle.Empty : Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+            }
+        }
+        protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); Invalidate(); }
+        protected override void Dispose(bool disposing) { if (disposing) versionFont.Dispose(); base.Dispose(disposing); }
+    }
     sealed class ThemeToolTip : ToolTip
     {
         readonly Font body = new Font("Segoe UI", 9);
@@ -100,6 +145,7 @@ namespace ReplayLite
         bool hovered, pressed;
         public string Detail = "";
         public NavigationGlyph Glyph = NavigationGlyph.None;
+        public string IconName = "";
         public bool AttentionDot = false;
         public Color Fill { get { return fill; } set { if (fill == value) return; fill = value; Transition(); } }
         public bool Animating { get { return false; } }
@@ -129,6 +175,7 @@ namespace ReplayLite
             var color = Enabled ? ForeColor : Theme.Muted;
             const TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
             if (Image != null) e.Graphics.DrawImage(Image, ClientRectangle);
+            else if (!string.IsNullOrEmpty(IconName)) { int size = (int)Math.Round(20 * e.Graphics.DpiX / 96f); LucideAssets.Draw(e.Graphics, IconName, new Rectangle((Width - size) / 2, (Height - size) / 2, size, size), color); }
             else if (Glyph != NavigationGlyph.None) DrawNavigation(e.Graphics, color);
             else if (Detail.Length == 0) TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, color, flags);
             else

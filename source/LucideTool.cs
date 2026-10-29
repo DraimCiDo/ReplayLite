@@ -10,7 +10,7 @@ namespace ReplayLite
 {
     static class LucideTool
     {
-        internal static readonly string[] Names = { "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left", "external-link", "save", "circle", "log-out", "circle-question-mark", "chevron-down", "chevron-up", "square-play", "pause", "circle-alert", "arrow-up", "check", "download", "x", "minus", "globe", "circle-dot" };
+        internal static readonly string[] Names = { "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left", "external-link", "save", "circle", "log-out", "circle-question-mark", "chevron-down", "chevron-up", "square-play", "pause", "circle-alert", "arrow-up", "check", "download", "x", "minus", "globe", "circle-dot", "copy", "trash" };
         static double Number(XElement node, string name, double fallback = 0) { var value = node.Attribute(name); return value == null ? fallback : double.Parse(value.Value, CultureInfo.InvariantCulture); }
         static Geometry Shape(XElement node)
         {

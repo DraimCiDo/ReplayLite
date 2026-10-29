@@ -24,7 +24,7 @@ namespace ReplayLite
         List<MonitorChoice> monitors = new List<MonitorChoice>();
         bool hotkeyRegistered;
         readonly ActionButton update = new ActionButton(); bool updating, monitorRefresh;
-        readonly PictureBox appLogo = new PictureBox(); readonly Label appName = new ThemeLabel();
+        readonly PictureBox appLogo = new PictureBox(); readonly BrandTitle appName = new BrandTitle();
         int updateFlashTicks;
         readonly ToggleSwitch startup = new ToggleSwitch(); readonly Label startupInfo = new ThemeLabel();
         readonly bool startInTray;
@@ -34,11 +34,11 @@ namespace ReplayLite
         bool checkingUpdates, updateDialogOpen, startupChanging, lastBalloonWasUpdate;
         ReleaseInfo availableRelease; Version notifiedVersion;
         readonly TextBox folder = new TextBox();
-        readonly ActionButton start = new ActionButton(), save = new ActionButton(), browse = new ActionButton(), openLast = new ActionButton(), openFolder = new ActionButton();
+        readonly ActionButton start = new ActionButton(), save = new ActionButton(), browse = new ActionButton(), openFolder = new ActionButton();
         readonly Panel recordingPage = new Panel(), settingsPage = new Panel();
         readonly ActionButton settingsGear = new ActionButton(), settingsBack = new ActionButton();
         readonly Label pageHeading = new ThemeLabel(); bool settingsOpen;
-        readonly Label versionLabel = new ThemeLabel(), settingsNote = new ThemeLabel(), videoSummary = new ThemeLabel();
+        readonly Label settingsNote = new ThemeLabel(), videoSummary = new ThemeLabel();
         readonly string appVersion = typeof(MainForm).Assembly.GetName().Version.ToString(3);
         readonly Label state = new ThemeLabel(), stateDetail = new ThemeLabel();
         readonly Label cpuValue = new ThemeLabel(), ramValue = new ThemeLabel(), bufferValue = new ThemeLabel(), diskValue = new ThemeLabel();
@@ -62,16 +62,16 @@ namespace ReplayLite
             StartPosition = FormStartPosition.CenterScreen; BackColor = Theme.Background; ForeColor = Theme.Text; Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
             RebuildBranding(); DoubleBuffered = true;
             appLogo.SetBounds(20, 17, 48, 48); appLogo.SizeMode = PictureBoxSizeMode.Zoom; appLogo.BackColor = Theme.Background; appLogo.AccessibleName = "ReplayLite"; Controls.Add(appLogo);
-            appName.Text = "ReplayLite"; appName.SetBounds(80, 17, 222, 48); appName.Font = new Font("Segoe UI", 23, FontStyle.Bold); appName.ForeColor = Theme.Text; appName.TextAlign = ContentAlignment.MiddleLeft; Controls.Add(appName);
-            versionLabel.Text = "v" + appVersion; versionLabel.Font = new Font("Segoe UI", 8); versionLabel.TextAlign = ContentAlignment.MiddleRight; versionLabel.ForeColor = Theme.Muted; Controls.Add(versionLabel);
-            appName.FontChanged += delegate { PositionVersionLabel(); }; appName.SizeChanged += delegate { PositionVersionLabel(); }; PositionVersionLabel();
+            appName.Text = "ReplayLite"; appName.VersionText = "v" + appVersion; appName.SetBounds(80, 8, 240, 64); appName.Font = new Font("Segoe UI", 23, FontStyle.Bold); appName.ForeColor = Theme.Text; Controls.Add(appName);
             badge.SetBounds(564, 17, 176, 32); Controls.Add(badge);
             update.Click += async delegate { await OpenUpdates(); };
             StyleButton(settingsGear, "", this, 704, 57, 36, 32, false); settingsGear.Glyph = NavigationGlyph.Gear; settingsGear.AccessibleName = L.T("Открыть настройки");
             StyleButton(update, L.T("Проверить обновления"), this, 660, 57, 36, 32, false); update.Glyph = NavigationGlyph.Update; update.AccessibleName = L.T("Проверить обновления");
+            InitializeLibraryNavigation();
             StyleButton(settingsBack, "", this, 20, 88, 36, 32, false); settingsBack.Glyph = NavigationGlyph.Back; settingsBack.AccessibleName = L.T("Назад");
             settingsBack.Fill = Theme.Background; settingsBack.ForeColor = Theme.Text;
             pageHeading.SetBounds(66, 88, 380, 32); pageHeading.TextAlign = ContentAlignment.MiddleLeft; pageHeading.Font = new Font("Segoe UI", 12, FontStyle.Bold); pageHeading.ForeColor = Theme.Text; Controls.Add(pageHeading);
+            pageHeading.AutoEllipsis = true;
             settingsGear.Click += delegate { ShowSettings(true); }; settingsBack.Click += delegate { NavigateBack(); };
             recordingPage.SetBounds(0, 134, 760, 325); settingsPage.SetBounds(0, 134, 760, 325);
             recordingPage.BackColor = settingsPage.BackColor = Theme.Background; Controls.Add(recordingPage); Controls.Add(settingsPage);
@@ -86,9 +86,6 @@ namespace ReplayLite
             Metric(cpuValue, "CPU", 20); Metric(ramValue, L.T("ПАМЯТЬ"), 203); Metric(bufferValue, L.T("В БУФЕРЕ"), 386); Metric(diskValue, L.T("НА ДИСКЕ"), 569);
             diskValue.Text = L.T("0 МБ");
             videoSummary.SetBounds(25, 259, 710, 19); videoSummary.Font = new Font("Segoe UI", 8); videoSummary.ForeColor = Theme.Muted; videoSummary.AutoEllipsis = true; recordingPage.Controls.Add(videoSummary);
-            StyleButton(openFolder, L.T("Папка повторов"), recordingPage, 20, 285, 354, 32, false); openFolder.Font = new Font("Segoe UI", 9); openFolder.Click += delegate { OpenFolder(); };
-            StyleButton(openLast, L.T("Последний повтор"), recordingPage, 386, 285, 354, 32, false); openLast.Font = new Font("Segoe UI", 9); openLast.Enabled = false;
-            openLast.Click += delegate { if (lastReplay != null && File.Exists(lastReplay)) Process.Start("explorer.exe", Recorder.Quote(lastReplay)); };
 
             InitializePreferenceInputs();
             UpdateOptionsSummary(); ShowSettings(false);
@@ -105,9 +102,9 @@ namespace ReplayLite
             menu.Opening += delegate { if (recorder != null && recorder.Running && !busy) UpdateSaveAvailability(recorder.BufferedSeconds); };
             SetState(L.T("Готово к записи"));
             timer.Tick += async delegate { await RefreshState(); }; timer.Start();
-            VisibleChanged += delegate { if (!Visible) { hotkey.CancelCapture(); StopAnimations(); } else if (recorder != null && recorder.Running && !busy) RefreshBufferMetrics(); };
+            VisibleChanged += delegate { LibraryVisibilityChanged(); if (!Visible) { hotkey.CancelCapture(); StopAnimations(); } else if (recorder != null && recorder.Running && !busy) RefreshBufferMetrics(); };
             Deactivate += delegate { hotkey.CancelCapture(); };
-            Resize += delegate { if (WindowState == FormWindowState.Minimized) { hotkey.CancelCapture(); StopAnimations(); } };
+            Resize += delegate { LibraryVisibilityChanged(); if (WindowState == FormWindowState.Minimized) { hotkey.CancelCapture(); StopAnimations(); } };
             FormClosing += async delegate(object sender, FormClosingEventArgs e) { if (quitting) return; if (e.CloseReason == CloseReason.WindowsShutDown) { EndWindowsSession(); return; } e.Cancel = true; if (settings.CloseToTray) Hide(); else await Quit(); };
             LocalizedUi.Attach(this); LocalizedUi.Attach(tray.ContextMenuStrip, this); L.Changed += LanguageChanged;
             Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
@@ -124,6 +121,7 @@ namespace ReplayLite
         bool SelectedMonitorSupported { get { return display.SelectedIndex >= 0 && display.SelectedIndex < monitors.Count && monitors[display.SelectedIndex].CanCapture; } }
         void ShowSettings(bool show)
         {
+            if (libraryOpen) CloseLibrary();
             hotkey.CancelCapture();
             CloseSettingsPopups(); settingsOpen = show;
             if (show && advancedOptions == null) BuildAdvancedSettings();
@@ -133,18 +131,11 @@ namespace ReplayLite
         }
         void UpdateNavigation()
         {
-            settingsGear.Visible = update.Visible = !settingsOpen; settingsBack.Visible = settingsOpen; RefreshUpdateIndicator(false);
+            settingsGear.Visible = update.Visible = libraryButton.Visible = !settingsOpen; settingsBack.Visible = settingsOpen; RefreshUpdateIndicator(false);
             pageHeading.Text = settingsOpen ? L.T(settingsTitles[settingsTab]) : "";
             pageHeading.Left = 66;
         }
-        void PositionVersionLabel()
-        {
-            var flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
-            Size nameSize = TextRenderer.MeasureText(appName.Text, appName.Font, new Size(int.MaxValue, int.MaxValue), flags);
-            Size versionSize = TextRenderer.MeasureText(versionLabel.Text, versionLabel.Font, new Size(int.MaxValue, int.MaxValue), flags);
-            versionLabel.SetBounds(appName.Left + Math.Min(appName.Width, nameSize.Width) - versionSize.Width - 2, Math.Max(2, appName.Top - versionSize.Height / 2), versionSize.Width + 2, versionSize.Height + 1);
-        }
-        void NavigateBack() { ShowSettings(false); }
+        void NavigateBack() { if (libraryOpen && player != null) ClosePlayer(); else ShowSettings(false); }
         void UpdateOptionsSummary()
         {
             bool active = recorder != null && recorder.Running;
@@ -365,7 +356,7 @@ namespace ReplayLite
             if (recoveryPending || !recorder.Running) return;
             if (recorder.BufferedSeconds <= 0) { UpdateSaveAvailability(0); SetState(L.T("Накапливаем первые кадры…"), TrayState.Recording); return; }
             saving = true; SetState(L.T("Сохраняю повтор…"), TrayState.Saving);
-            try { var output = await recorder.SaveAsync(); lastReplay = output; openLast.Enabled = true; RefreshBufferMetrics(); progress.FinishAnimation(); SetState(L.T("Сохранено: ") + Path.GetFileName(output)); if (!testing) { if (settings.SaveNotification) { lastBalloonWasUpdate = false; tray.ShowBalloonTip(3000, L.T("Повтор сохранён"), output, ToolTipIcon.Info); } if (settings.SaveSound) { var feedback = SaveFeedback.PlayAsync(settings.FeedbackTone, settings.FeedbackVolume); } } }
+            try { var output = await recorder.SaveAsync(); lastReplay = output; RefreshBufferMetrics(); progress.FinishAnimation(); SetState(L.T("Сохранено: ") + Path.GetFileName(output)); if (!testing) { if (settings.SaveNotification) { lastBalloonWasUpdate = false; tray.ShowBalloonTip(3000, L.T("Повтор сохранён"), output, ToolTipIcon.Info); } if (settings.SaveSound) { var feedback = SaveFeedback.PlayAsync(settings.FeedbackTone, settings.FeedbackVolume); } } }
             catch (Exception e) { ShowError(e.Message); SetState(L.T("Ошибка сохранения"), TrayState.Error); }
             finally { saving = false; SyncActions(); }
         }
@@ -498,13 +489,13 @@ namespace ReplayLite
         }
         void ReleaseUi()
         {
-            if (released) return; released = true; L.Changed -= LanguageChanged; updateCancel.Cancel(); updateCancel.Dispose(); timer.Stop(); timer.Dispose(); StopAnimations();
+            if (released) return; released = true; DisposeLibrary(); L.Changed -= LanguageChanged; updateCancel.Cancel(); updateCancel.Dispose(); timer.Stop(); timer.Dispose(); StopAnimations();
             Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
             Microsoft.Win32.SystemEvents.SessionSwitch -= SessionChanged;
             if (IsHandleCreated) Native.UnregisterHotKey(Handle, 1);
             foreach (var input in new Control[] { duration, fps, sound, display, rate, hotkey, folder, startup, startupInfo, hotkeyInfo }) if (input.Parent == null) input.Dispose();
             tray.Visible = false; var menu = tray.ContextMenuStrip; tray.Dispose(); if (menu != null) menu.Dispose(); tips.Dispose();
-            Icon = null; foreach (var icon in icons) icon.Dispose(); brand.Dispose();
+            Icon = null; if (taskbarIcon != null) taskbarIcon.Dispose(); foreach (var icon in icons) icon.Dispose(); brand.Dispose();
         }
         protected override void Dispose(bool disposing) { if (disposing) ReleaseUi(); base.Dispose(disposing); }
         protected override async void OnShown(EventArgs e)
@@ -547,7 +538,7 @@ namespace ReplayLite
         {
             testing = true; VerifyControls(); var report = new System.Text.StringBuilder();
             if (advancedOptions != null) throw new Exception("Settings controls allocated before opening.");
-            if (settingsPage.Visible || !recordingPage.Visible || versionLabel.Text != "v" + appVersion || !Text.EndsWith(appVersion)) throw new Exception("Default page or application version missing.");
+            if (settingsPage.Visible || !recordingPage.Visible || appName.VersionText != "v" + appVersion || !Text.EndsWith(appVersion)) throw new Exception("Default page or application version missing.");
             Size originalSize = ClientSize;
             ShowSettings(true);
             if (!settingsPage.Visible || recordingPage.Visible) throw new Exception("Settings navigation failed.");
@@ -724,7 +715,7 @@ namespace ReplayLite
                 Hide(); UpdateSaveAvailability(0); tray.ContextMenuStrip.Show(new Point(40, 40));
                 if (!traySave.Enabled) throw new Exception("Hidden window left the tray save command disabled.");
                 tray.ContextMenuStrip.Close(); Restore(); await SaveReplay();
-                if (lastReplay == null || !File.Exists(lastReplay) || !openLast.Enabled || !recorder.Running) throw new Exception("Saving did not expose the replay or continue capture.");
+                if (lastReplay == null || !File.Exists(lastReplay) || !recorder.Running) throw new Exception("Saving did not expose the replay or continue capture.");
                 if (save.Enabled != (recorder.BufferedSeconds > 0)) throw new Exception("Save availability did not follow buffer reset.");
                 timeout.Restart(); while (recorder.BufferedSeconds <= 0 && timeout.ElapsedMilliseconds < 6000) await Task.Delay(100);
                 RefreshBufferMetrics(); if (!save.Enabled || !traySave.Enabled) throw new Exception("Saving did not become available after refill.");
@@ -737,7 +728,7 @@ namespace ReplayLite
                 if (!reported || busy || recorder != null || start.Enabled != SelectedMonitorSupported || !duration.Enabled || !browse.Enabled) throw new Exception("Capture failure left the start controls locked.");
             }
             catch (Exception error) { failure = error; }
-            busy = true; await StopRecorder(); busy = false; lastReplay = null; openLast.Enabled = false; SetState(L.T("Готово к записи")); Deployment.Cleanup(root);
+            busy = true; await StopRecorder(); busy = false; lastReplay = null; SetState(L.T("Готово к записи")); Deployment.Cleanup(root);
             if (failure != null) throw failure;
         }
         static void VerifyMenuForTest(RoundedMenu menu, bool withIcons, int expectedCommands = 5)
@@ -891,11 +882,23 @@ namespace ReplayLite
                 }
                 for (int i = 0; i < 6; i++) { await Task.Delay(1000); await RefreshState(); }
                 await SaveReplay();
-                if (lastReplay == null || !File.Exists(lastReplay) || !openLast.Enabled || traySave.Enabled != (recorder.BufferedSeconds > 0) || trayState != TrayState.Recording) throw new Exception("Save action or tray state failed.");
+                if (lastReplay == null || !File.Exists(lastReplay) || traySave.Enabled != (recorder.BufferedSeconds > 0) || trayState != TrayState.Recording) throw new Exception("Save action or tray state failed.");
                 report.AppendLine("LIVE_SAVE_ACTIONS_AND_TRAY: PASS");
                 if (advanced && !Path.GetFileName(lastReplay).StartsWith("Клип-", StringComparison.Ordinal)) throw new Exception("English export changed the user filename.");
                 if (recorder.BufferedSeconds > 2.1 || progress.Value > 2.1f / settings.Seconds || progress.Animating) throw new Exception("Saved buffer was not reset in the UI.");
                 report.AppendLine("LIVE_BUFFER_COUNTER_AND_PROGRESS_RESET: PASS");
+                if (advanced)
+                {
+                    int capturePid = recorder.ProcessId; ShowLibrary(); await libraryLoading;
+                    if (!clips.Exists(item => item.Path == lastReplay) || recordingPage.Visible) throw new Exception("Saved clip did not appear in the embedded library.");
+                    using (var image = new Bitmap(Width, Height)) { DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(root, "library.png")); }
+                    await OpenClip(clips.Find(item => item.Path == lastReplay)); if (player == null) throw new Exception("Saved clip did not open inside ReplayLite."); player.SetVolume(0);
+                    await Until(() => player.Frames >= 3 && player.HasRenderedFrame, 10000, "Saved NVENC clip did not play inside the app.");
+                    if (!recorder.Running || recorder.ProcessId != capturePid) throw new Exception("Library playback restarted the recorder.");
+                    using (var image = new Bitmap(Width, Height)) { DrawToBitmap(image, new Rectangle(Point.Empty, image.Size)); image.Save(Path.Combine(root, "player.png")); }
+                    player.Pause(); await player.Completion; NavigateBack(); await libraryLoading; ShowSettings(false);
+                    report.AppendLine("LIVE_LIBRARY_SAVED_CLIP_PREVIEW_EMBEDDED_PLAYBACK_CAPTURE_PID_UNCHANGED: PASS");
+                }
                 await Toggle();
                 if (recorder != null || trayState != TrayState.Idle || traySave.Enabled || !duration.Enabled || !browse.Enabled) throw new Exception("Stop controls or idle icon failed.");
                 if (advanced) languageChoice.SelectedIndex = 0;

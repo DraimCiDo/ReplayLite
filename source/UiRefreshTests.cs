@@ -65,9 +65,9 @@ namespace ReplayLite
                 languageChoice.SelectedIndex = 1; languageChoice.SelectedIndex = 0;
                 if (bufferFolder.Text != settings.BufferFolder) throw new Exception("Buffer path changed across locales.");
                 settings.BufferFolder = ""; RefreshBufferFolder();
-                var titleSize = TextRenderer.MeasureText(appName.Text, appName.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                if (titleSize.Width > appName.Width || titleSize.Height + 4 > appName.Height || versionLabel.Right != appName.Left + titleSize.Width || versionLabel.Top >= appName.Top || versionLabel.Bottom >= appName.Top + appName.Height / 2) throw new Exception("Brand name clips or version is not above the final letter.");
-                if (appName.Top + appName.Height / 2 != appLogo.Top + appLogo.Height / 2 || pageHeading.Top + pageHeading.Height / 2 != settingsBack.Top + settingsBack.Height / 2 || pageHeading.TextAlign != ContentAlignment.MiddleLeft) throw new Exception("Header text is not vertically centered with its icons.");
+                using (var header = new Bitmap(appName.Width, appName.Height)) appName.DrawToBitmap(header, appName.ClientRectangle);
+                if (!appName.ClientRectangle.Contains(appName.TitleBounds) || !appName.ClientRectangle.Contains(appName.VersionBounds) || appName.TitleBounds.IntersectsWith(appName.VersionBounds) || Math.Abs(appName.VersionBounds.Left + appName.VersionBounds.Width / 2 - appName.LastLetterCenter) > 1 || appName.TitleBounds.Top - appName.VersionBounds.Bottom > 2) throw new Exception("Brand version is clipped or not directly above the final e.");
+                if (Math.Abs(appName.Top + appName.TitleBounds.Top + appName.TitleBounds.Height / 2 - appLogo.Top - appLogo.Height / 2) > 3 || pageHeading.Top + pageHeading.Height / 2 != settingsBack.Top + settingsBack.Height / 2) throw new Exception("Header text is not vertically centered with its icons.");
                 var legacy = new Settings { SystemDevice = "legacy-custom-output", Folder = originalFolder, Palette = "ocean" }; legacy.SaveToFile(file);
                 using (var migrated = new MainForm(false, true))
                 {
