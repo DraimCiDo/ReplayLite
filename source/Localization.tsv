@@ -271,3 +271,37 @@ Windows не вернула дескриптор выбранного монит
 Язык приложения	App language
 Язык интерфейса и уведомлений. Применяется сразу, запись не перезапускается.	Interface and notification language. Applied immediately without restarting recording.
 Русский	Русский
+Выберите экран для записи. Монитор должен быть подключён к видеокарте NVIDIA.	Choose the screen to record. It must be connected to an NVIDIA graphics card.
+Сколько последних секунд хранить до сохранения клипа. Если запись началась недавно, сохранится доступный фрагмент.	How much recent footage to keep before saving a clip. If recording just started, the available footage will be saved.
+Добавляет указатель мыши в записанное видео.	Includes the mouse pointer in the recorded video.
+Здесь хранится временная запись до сохранения клипа. Выбирайте быстрый локальный диск со свободным местом.	Temporary footage is stored here until you save a clip. Choose a fast local drive with free space.
+Сколько места оставить свободным на диске буфера. Аварийный запас 128 МБ действует всегда.	How much free space to leave on the buffer drive. A 128 MB safety reserve always applies.
+Останавливает запись, когда на диске остаётся меньше места, чем указано в резерве.	Stops recording when free space on the drive falls below the selected reserve.
+Сюда сохраняются готовые клипы по кнопке или горячей клавише. Временный буфер хранится отдельно.	Finished clips are saved here when you use the button or shortcut. The temporary buffer is stored separately.
+MP4 открывается в большинстве плееров и сервисов. MKV — альтернативный контейнер. Формат не меняет качество видео.	MP4 works with most players and services. MKV is an alternative container. The format does not change video quality.
+Выберите готовый вариант имени или задайте свой в поле ниже.	Choose a filename preset or enter your own template below.
+Вставьте {date} для даты, {time} для времени, {monitor} для номера экрана. Также доступен {YYYY-MM-DD_HH-MM-SS}. Расширение добавится само; одинаковые имена получат номер.	Use {date} for the date, {time} for the time, and {monitor} for the screen number. {YYYY-MM-DD_HH-MM-SS} is also supported. The extension is added automatically; duplicate names get a number.
+30 кадров/с снижает нагрузку. 60 кадров/с делает движение плавнее, но требует больше ресурсов.	30 fps uses fewer resources. 60 fps makes motion smoother but requires more resources.
+Исходное разрешение сохраняет размер экрана и обработку на GPU. Уменьшение до 1080p или 720p сохраняет пропорции, но дополнительно нагружает CPU и память.	Native resolution keeps the screen size and GPU processing. Scaling down to 1080p or 720p preserves the aspect ratio but adds CPU and memory load.
+Видео сжимается на видеокарте через NVENC. H.264 совместим с большинством устройств. Для HEVC и AV1 нужна поддержка видеокарты и плеера.	Video is encoded on the GPU using NVENC. H.264 works with most devices. HEVC and AV1 require support from both the GPU and the player.
+Больше битрейт — меньше потерь в деталях, но крупнее клипы и временный буфер.	A higher bitrate preserves more detail but produces larger clips and a larger temporary buffer.
+CBR держит примерно постоянный поток данных. VBR уменьшает его на простых сценах; выбранный битрейт задаёт верхний предел.	CBR keeps the data rate roughly constant. VBR lowers it in simpler scenes; the selected bitrate sets the upper limit.
+Нажмите поле и введите клавишу или сочетание. Оно сохранит клип даже во время игры. Занятое сочетание не заменит прежнее.	Click the field and press a key or combination. It saves a clip even while you are in a game. A conflicting shortcut will not replace the previous one.
+Выберите сигнал, который прозвучит после сохранения готового клипа. Его можно проверить кнопкой ниже.	Choose the sound played after a clip is successfully saved. Use the button below to preview it.
+Меняет громкость сигнала сохранения. При 0% сигнала не слышно; громкость Windows не меняется.	Adjusts the save sound. At 0% it is silent; Windows volume is unchanged.
+Показывает уведомление Windows, когда клип успешно сохранён.	Shows a Windows notification when a clip has been saved successfully.
+Воспроизводит выбранный сигнал, когда клип успешно сохранён.	Plays the selected sound when a clip has been saved successfully.
+Запускает ReplayLite вместе с Windows и сразу включает запись в фоне.	Starts ReplayLite with Windows and turns on background recording immediately.
+Крестик скрывает окно, а запись продолжается. Если выключить, крестик завершит приложение. Для полного выхода также есть пункт в трее.	The close button hides the window and recording continues. When disabled, it quits the app. You can also quit from the tray menu.
+При обычном запуске окно останется в трее. Запись сама не включится; автозапуск с Windows настраивается отдельно.	On a normal launch, the app stays in the tray without starting recording. Starting with Windows is configured separately.
+Меняет фон, карточки, поля, кнопки и значки. Применяется сразу и сохраняется для следующего запуска.	Changes the background, cards, fields, buttons, and icons. Applies immediately and is kept for the next launch.
+Меняет язык меню, подсказок и уведомлений. Текущая запись продолжится без перезапуска.	Changes the language of menus, help, and notifications. Recording continues without restarting.
+Сохраните последние моменты кнопкой или сочетанием клавиш.\nЗапись продолжится, если скрыть окно в трей.	Save recent moments with the button or keyboard shortcut.\nRecording continues when the window is hidden to the tray.
+Включите запись до игры или нужного события.\nСохранить можно уже записанный фрагмент из буфера.	Start recording before the game or the moment you want to keep.\nSave the footage already collected in the buffer.
+Записывает звук игр и приложений с устройства Windows по умолчанию.	Records game and app audio from the Windows default output device.
+Добавляет голос с выбранного микрофона. Работает и без звука компьютера.	Adds voice from the selected microphone. Works without system audio too.
+Меняет громкость звука компьютера только в клипе. На громкость Windows не влияет.	Changes system audio volume only in the clip. Does not change Windows volume.
+Меняет громкость голоса только в клипе. При 0% голос не слышен.	Changes voice volume only in the clip. At 0% the microphone is silent.
+Выберите микрофон для записи голоса. Если он отключится, видео продолжится без него до подключения.	Choose the microphone for voice recording. If it disconnects, video continues without it until it returns.
+Проверять обновления автоматически	Check for updates automatically
+Проверяет GitHub при запуске и раз в 5 минут. Кнопка подсветится, когда найдётся новая версия. Установка — по нажатию.	Checks GitHub on startup and every 5 minutes. The button lights up when a new version is found. Installation starts only when you choose it.

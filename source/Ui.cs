@@ -16,17 +16,21 @@ namespace ReplayLite
         public static Color Background = Color.FromArgb(13, 17, 24), Card = Color.FromArgb(22, 28, 39), Input = Color.FromArgb(30, 38, 51);
         public static Color Border = Color.FromArgb(43, 53, 69), Text = Color.FromArgb(239, 244, 251), Muted = Color.FromArgb(143, 159, 181);
         public static Color Accent = Color.FromArgb(76, 224, 178), Blue = Color.FromArgb(113, 168, 255), Red = Color.FromArgb(255, 131, 139);
+        public static Color AccentText = Color.FromArgb(20, 33, 29);
         public static void SetPalette(string name)
         {
             bool light = name == "light";
-            Background = light ? Color.FromArgb(236, 241, 246) : Color.FromArgb(13, 17, 24);
-            Card = light ? Color.White : Color.FromArgb(22, 28, 39);
-            Input = light ? Color.FromArgb(225, 233, 242) : Color.FromArgb(30, 38, 51);
-            Border = light ? Color.FromArgb(194, 205, 219) : Color.FromArgb(43, 53, 69);
-            Text = light ? Color.FromArgb(24, 35, 49) : Color.FromArgb(239, 244, 251);
-            Muted = light ? Color.FromArgb(76, 95, 117) : Color.FromArgb(143, 159, 181);
-            Accent = name == "ocean" ? Color.FromArgb(88, 181, 245) : name == "violet" ? Color.FromArgb(186, 157, 250) : light ? Color.FromArgb(20, 157, 119) : Color.FromArgb(76, 224, 178);
-            Red = light ? Color.FromArgb(177, 43, 64) : Color.FromArgb(255, 131, 139);
+            bool ocean = name == "ocean", violet = name == "violet";
+            Background = light ? Color.FromArgb(238, 239, 234) : ocean ? Color.FromArgb(18, 26, 35) : violet ? Color.FromArgb(25, 23, 34) : Color.FromArgb(18, 26, 27);
+            Card = light ? Color.FromArgb(250, 250, 245) : ocean ? Color.FromArgb(28, 39, 51) : violet ? Color.FromArgb(36, 33, 47) : Color.FromArgb(27, 38, 39);
+            Input = light ? Color.FromArgb(227, 232, 222) : ocean ? Color.FromArgb(39, 53, 69) : violet ? Color.FromArgb(49, 44, 62) : Color.FromArgb(37, 50, 51);
+            Border = light ? Color.FromArgb(190, 202, 188) : ocean ? Color.FromArgb(58, 77, 96) : violet ? Color.FromArgb(74, 65, 91) : Color.FromArgb(58, 77, 75);
+            Text = light ? Color.FromArgb(35, 48, 40) : ocean ? Color.FromArgb(230, 237, 245) : violet ? Color.FromArgb(239, 234, 245) : Color.FromArgb(231, 239, 235);
+            Muted = light ? Color.FromArgb(82, 100, 87) : ocean ? Color.FromArgb(166, 182, 201) : violet ? Color.FromArgb(187, 176, 202) : Color.FromArgb(167, 185, 179);
+            Accent = light ? Color.FromArgb(54, 111, 86) : ocean ? Color.FromArgb(143, 188, 219) : violet ? Color.FromArgb(191, 171, 221) : Color.FromArgb(139, 204, 180);
+            AccentText = light ? Color.FromArgb(250, 250, 245) : Color.FromArgb(20, 33, 29);
+            Blue = light ? Color.FromArgb(48, 98, 138) : Color.FromArgb(154, 187, 218);
+            Red = light ? Color.FromArgb(161, 57, 68) : Color.FromArgb(224, 153, 159);
         }
         public static GraphicsPath Round(RectangleF r, float radius)
         {
@@ -61,22 +65,19 @@ namespace ReplayLite
     }
     sealed class ThemeToolTip : ToolTip
     {
-        readonly Font heading = new Font("Segoe UI", 9, FontStyle.Bold), body = new Font("Segoe UI", 9);
+        readonly Font body = new Font("Segoe UI", 9);
         public ThemeToolTip()
         {
             OwnerDraw = true; ShowAlways = true; InitialDelay = 450; ReshowDelay = 100; AutoPopDelay = 15000; UseAnimation = UseFading = false;
-            Popup += delegate(object sender, PopupEventArgs e) { var text = GetToolTip(e.AssociatedControl); var size = TextRenderer.MeasureText(text, body, new Size(320, 1000), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding); e.ToolTipSize = new Size(Math.Min(344, Math.Max(160, size.Width + 24)), size.Height + 48); };
+            Popup += delegate(object sender, PopupEventArgs e) { var text = GetToolTip(e.AssociatedControl); var size = TextRenderer.MeasureText(text, body, new Size(320, 1000), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding); e.ToolTipSize = new Size(Math.Min(344, Math.Max(120, size.Width + 24)), size.Height + 24); };
             Draw += delegate(object sender, DrawToolTipEventArgs e)
             {
                 e.Graphics.Clear(Theme.Card); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var pen = new Pen(Theme.Border)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
-                string title = e.AssociatedControl == null ? "ReplayLite" : e.AssociatedControl.AccessibleName;
-                if (string.IsNullOrEmpty(title)) title = e.AssociatedControl == null ? "ReplayLite" : e.AssociatedControl.Text;
-                TextRenderer.DrawText(e.Graphics, title, heading, new Rectangle(12, 10, e.Bounds.Width - 24, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(e.Graphics, e.ToolTipText, body, new Rectangle(12, 34, e.Bounds.Width - 24, e.Bounds.Height - 42), Theme.Muted, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(e.Graphics, e.ToolTipText, body, new Rectangle(12, 12, e.Bounds.Width - 24, e.Bounds.Height - 24), Theme.Text, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
             };
         }
-        protected override void Dispose(bool disposing) { if (disposing) { heading.Dispose(); body.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) body.Dispose(); base.Dispose(disposing); }
     }
     sealed class CardPanel : Panel
     {
@@ -90,7 +91,7 @@ namespace ReplayLite
             base.OnPaint(e);
         }
     }
-    enum NavigationGlyph { None, Gear, Back, Monitor, Folder, Video, Audio, Keyboard, Windows }
+    enum NavigationGlyph { None, Gear, Back, Monitor, Folder, Video, Audio, Keyboard, Windows, Update }
     sealed class ActionButton : Button
     {
         Color current = Theme.Input;
@@ -142,7 +143,7 @@ namespace ReplayLite
         }
         void DrawNavigation(Graphics graphics, Color color)
         {
-            string[] names = { "", "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left" };
+            string[] names = { "", "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left", "download" };
             int size = (int)Math.Round(20 * graphics.DpiX / 96f);
             LucideAssets.Draw(graphics, names[(int)Glyph], new Rectangle((Width - size) / 2, (Height - size) / 2, size, size), color);
         }

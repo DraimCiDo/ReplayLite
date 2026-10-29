@@ -66,13 +66,13 @@ namespace ReplayLite
     }
     sealed class UpdateForm : Form
     {
-        readonly Label status = new ThemeLabel(); readonly ActionButton button = new ActionButton { Fill = Theme.Accent, ForeColor = Color.FromArgb(9, 37, 29), BackColor = Theme.Background }; readonly CancellationTokenSource cancel = new CancellationTokenSource();
-        readonly Func<string, Task> apply; ReleaseInfo release; bool downloading;
-        public UpdateForm(Func<string, Task> applyUpdate, ReleaseInfo available = null)
+        readonly Label status = new ThemeLabel(); readonly ActionButton button = new ActionButton { Fill = Theme.Accent, ForeColor = Theme.AccentText, BackColor = Theme.Background }; readonly CancellationTokenSource cancel = new CancellationTokenSource();
+        readonly Func<string, Task> apply; readonly Action<ReleaseInfo> releaseChecked; ReleaseInfo release; bool downloading;
+        public UpdateForm(Func<string, Task> applyUpdate, ReleaseInfo available = null, Action<ReleaseInfo> checkedRelease = null)
         {
             apply = applyUpdate; Text = L.T("Обновление ReplayLite"); ClientSize = new Size(485, 185); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent; Font = new Font("Segoe UI", 10); BackColor = Theme.Background; ForeColor = Theme.Text;
             status.SetBounds(24, 22, 437, 85); button.SetBounds(24, 123, 437, 36); button.Text = L.T("Проверка…"); button.Enabled = false; Controls.AddRange(new Control[] { status, button });
-            LocalizedUi.Attach(this); HandleCreated += delegate { WindowTheme.Apply(this); };
+            releaseChecked = checkedRelease; LocalizedUi.Attach(this); HandleCreated += delegate { WindowTheme.Apply(this); };
             Shown += async delegate { if (available == null) await Check(); else { release = available; ShowRelease(); button.Enabled = true; } }; button.Click += async delegate { if (release == null) await Check(); else await Download(); }; FormClosing += delegate { cancel.Cancel(); };
         }
         async Task Check()
@@ -81,7 +81,7 @@ namespace ReplayLite
             try
             {
                 release = await Updates.Latest(cancel.Token);
-                if (!IsDisposed && !cancel.IsCancellationRequested) ShowRelease();
+                if (!IsDisposed && !cancel.IsCancellationRequested) { if (releaseChecked != null) releaseChecked(release); ShowRelease(); }
             }
             catch (Exception e) { if (!cancel.IsCancellationRequested) { release = null; status.Text = L.T("Не удалось проверить: ") + e.Message; button.Text = L.T("Повторить проверку"); } }
             finally { if (!IsDisposed) button.Enabled = true; }

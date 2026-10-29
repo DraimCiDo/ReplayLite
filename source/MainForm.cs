@@ -24,11 +24,13 @@ namespace ReplayLite
         List<MonitorChoice> monitors = new List<MonitorChoice>();
         bool hotkeyRegistered;
         readonly ActionButton update = new ActionButton(); bool updating, monitorRefresh;
+        readonly PictureBox appLogo = new PictureBox(); readonly Label appName = new ThemeLabel();
+        int updateFlashTicks;
         readonly ToggleSwitch startup = new ToggleSwitch(); readonly Label startupInfo = new ThemeLabel();
         readonly bool startInTray;
         bool startupCanceled;
         readonly System.Threading.CancellationTokenSource updateCancel = new System.Threading.CancellationTokenSource();
-        DateTime nextUpdateCheck = DateTime.MaxValue;
+        DateTime nextUpdateCheck = DateTime.MinValue;
         bool checkingUpdates, updateDialogOpen, startupChanging, lastBalloonWasUpdate;
         ReleaseInfo availableRelease; Version notifiedVersion;
         readonly TextBox folder = new TextBox();
@@ -59,15 +61,17 @@ namespace ReplayLite
             Text = "ReplayLite v" + appVersion; ClientSize = new Size(760, 480); FormBorderStyle = FormBorderStyle.FixedSingle; MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen; BackColor = Theme.Background; ForeColor = Theme.Text; Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
             RebuildBranding(); DoubleBuffered = true;
-            StyleButton(update, L.T("Проверить обновления"), this, 20, 17, 48, 48, false); update.Image = brand; update.Fill = Theme.Background; update.AccessibleName = L.T("Проверить обновления");
-            LabelAt(this, "ReplayLite", 79, 12, 165, 35, 21, true, Theme.Text);
-            versionLabel.Text = "v" + appVersion; versionLabel.SetBounds(247, 23, 100, 23); versionLabel.Font = new Font("Segoe UI", 9); versionLabel.ForeColor = Theme.Muted; Controls.Add(versionLabel);
+            appLogo.SetBounds(20, 17, 48, 48); appLogo.SizeMode = PictureBoxSizeMode.Zoom; appLogo.BackColor = Theme.Background; appLogo.AccessibleName = "ReplayLite"; Controls.Add(appLogo);
+            appName.Text = "ReplayLite"; appName.SetBounds(80, 17, 222, 48); appName.Font = new Font("Segoe UI", 23, FontStyle.Bold); appName.ForeColor = Theme.Text; appName.TextAlign = ContentAlignment.MiddleLeft; Controls.Add(appName);
+            versionLabel.Text = "v" + appVersion; versionLabel.Font = new Font("Segoe UI", 8); versionLabel.TextAlign = ContentAlignment.MiddleRight; versionLabel.ForeColor = Theme.Muted; Controls.Add(versionLabel);
+            appName.FontChanged += delegate { PositionVersionLabel(); }; appName.SizeChanged += delegate { PositionVersionLabel(); }; PositionVersionLabel();
             badge.SetBounds(564, 17, 176, 32); Controls.Add(badge);
             update.Click += async delegate { await OpenUpdates(); };
             StyleButton(settingsGear, "", this, 704, 57, 36, 32, false); settingsGear.Glyph = NavigationGlyph.Gear; settingsGear.AccessibleName = L.T("Открыть настройки");
+            StyleButton(update, L.T("Проверить обновления"), this, 660, 57, 36, 32, false); update.Glyph = NavigationGlyph.Update; update.AccessibleName = L.T("Проверить обновления");
             StyleButton(settingsBack, "", this, 20, 88, 36, 32, false); settingsBack.Glyph = NavigationGlyph.Back; settingsBack.AccessibleName = L.T("Назад");
             settingsBack.Fill = Theme.Background; settingsBack.ForeColor = Theme.Text;
-            pageHeading.SetBounds(66, 89, 380, 30); pageHeading.Font = new Font("Segoe UI", 12, FontStyle.Bold); pageHeading.ForeColor = Theme.Text; Controls.Add(pageHeading);
+            pageHeading.SetBounds(66, 88, 380, 32); pageHeading.TextAlign = ContentAlignment.MiddleLeft; pageHeading.Font = new Font("Segoe UI", 12, FontStyle.Bold); pageHeading.ForeColor = Theme.Text; Controls.Add(pageHeading);
             settingsGear.Click += delegate { ShowSettings(true); }; settingsBack.Click += delegate { NavigateBack(); };
             recordingPage.SetBounds(0, 134, 760, 325); settingsPage.SetBounds(0, 134, 760, 325);
             recordingPage.BackColor = settingsPage.BackColor = Theme.Background; Controls.Add(recordingPage); Controls.Add(settingsPage);
@@ -129,9 +133,16 @@ namespace ReplayLite
         }
         void UpdateNavigation()
         {
-            settingsGear.Visible = !settingsOpen; settingsBack.Visible = settingsOpen;
+            settingsGear.Visible = update.Visible = !settingsOpen; settingsBack.Visible = settingsOpen; RefreshUpdateIndicator(false);
             pageHeading.Text = settingsOpen ? L.T(settingsTitles[settingsTab]) : "";
             pageHeading.Left = 66;
+        }
+        void PositionVersionLabel()
+        {
+            var flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
+            Size nameSize = TextRenderer.MeasureText(appName.Text, appName.Font, new Size(int.MaxValue, int.MaxValue), flags);
+            Size versionSize = TextRenderer.MeasureText(versionLabel.Text, versionLabel.Font, new Size(int.MaxValue, int.MaxValue), flags);
+            versionLabel.SetBounds(appName.Left + Math.Min(appName.Width, nameSize.Width) - versionSize.Width - 2, Math.Max(2, appName.Top - versionSize.Height / 2), versionSize.Width + 2, versionSize.Height + 1);
         }
         void NavigateBack() { ShowSettings(false); }
         void UpdateOptionsSummary()
@@ -165,21 +176,23 @@ namespace ReplayLite
             control.SetBounds(x, y, width, 40); parent.Controls.Add(control);
         }
         void StyleButton(ActionButton button, string text, Control parent, int x, int y, int width, int height, bool accent)
-        { button.Text = text; button.SetBounds(x, y, width, height); button.BackColor = parent is CardPanel ? Theme.Card : parent.BackColor; button.Font = new Font("Segoe UI", 10, FontStyle.Bold); button.ForeColor = accent ? Color.FromArgb(9, 37, 29) : Theme.Text; button.Fill = accent ? Theme.Accent : Theme.Input; parent.Controls.Add(button); }
-        void StopAnimations() { foreach (var button in AllActionButtons(this)) button.FinishAnimation(); progress.FinishAnimation(); badge.FinishAnimation(); }
+        { button.Text = text; button.SetBounds(x, y, width, height); button.BackColor = parent is CardPanel ? Theme.Card : parent.BackColor; button.Font = new Font("Segoe UI", 10, FontStyle.Bold); button.ForeColor = accent ? Theme.AccentText : Theme.Text; button.Fill = accent ? Theme.Accent : Theme.Input; parent.Controls.Add(button); }
+        void StopAnimations() { updateFlashTicks = 0; RefreshUpdateIndicator(false); foreach (var button in AllActionButtons(this)) button.FinishAnimation(); progress.FinishAnimation(); badge.FinishAnimation(); }
         async Task OpenUpdates()
         {
             if (updating || updateDialogOpen || closing || released) return;
             updateDialogOpen = true; Restore();
-            try { using (var dialog = new UpdateForm(ApplyUpdate, availableRelease)) dialog.ShowDialog(this); }
+            try { using (var dialog = new UpdateForm(ApplyUpdate, availableRelease, release => { nextUpdateCheck = DateTime.UtcNow.AddMinutes(5); SetAvailableRelease(release); })) dialog.ShowDialog(this); }
             finally { updateDialogOpen = false; }
             if (updating) await Quit();
         }
-        async Task CheckForUpdates()
+        bool UpdateCheckDue(DateTime now)
+        { return settings.CheckUpdatesOnStartup && !checkingUpdates && !updateDialogOpen && !updating && !closing && !released && now >= nextUpdateCheck; }
+        async Task CheckForUpdates(Func<System.Threading.CancellationToken, Task<ReleaseInfo>> lookup = null)
         {
-            if (checkingUpdates || closing || released || testing) return;
-            checkingUpdates = true; nextUpdateCheck = DateTime.UtcNow.AddHours(6);
-            try { var release = await Updates.Latest(updateCancel.Token); if (!released && !closing) SetAvailableRelease(release); }
+            if ((testing && lookup == null) || !UpdateCheckDue(DateTime.UtcNow)) return;
+            checkingUpdates = true; nextUpdateCheck = DateTime.UtcNow.AddMinutes(5);
+            try { var release = await (lookup ?? Updates.Latest)(updateCancel.Token); if (!released && !closing && settings.CheckUpdatesOnStartup) SetAvailableRelease(release); }
             catch (Exception) { /* Automatic checks stay quiet when offline or rate limited. */ }
             finally { checkingUpdates = false; }
         }
@@ -187,20 +200,31 @@ namespace ReplayLite
         {
             availableRelease = release != null && release.Version > typeof(MainForm).Assembly.GetName().Version ? release : null;
             update.Text = availableRelease == null ? L.T("Проверить обновления") : L.T("Обновить до ") + availableRelease.Version.ToString(3);
-            update.AccessibleName = update.Text; update.AttentionDot = false; update.Invalidate(); RefreshTrayIcon();
-            Tip(update, update.Text + L.T(" · нажмите на логотип"));
+            update.AccessibleName = update.Text; RefreshUpdateIndicator(false); RefreshTrayIcon();
+            Tip(update, update.Text);
             trayUpdate.Visible = availableRelease != null; trayUpdate.Text = update.Text;
             if (availableRelease == null || availableRelease.Version == notifiedVersion) return false;
             notifiedVersion = availableRelease.Version;
-            if (!testing) { lastBalloonWasUpdate = true; tray.ShowBalloonTip(5000, L.T("Доступно обновление ReplayLite"), L.T("Версия ") + notifiedVersion.ToString(3) + L.T(". Нажмите, чтобы открыть обновление."), ToolTipIcon.Info); }
+            updateFlashTicks = update.Visible && Visible && WindowState != FormWindowState.Minimized && !updateDialogOpen ? 6 : 0; RefreshUpdateIndicator(false);
+            if (!testing && !updateDialogOpen) { lastBalloonWasUpdate = true; tray.ShowBalloonTip(5000, L.T("Доступно обновление ReplayLite"), L.T("Версия ") + notifiedVersion.ToString(3) + L.T(". Нажмите, чтобы открыть обновление."), ToolTipIcon.Info); }
             return true;
+        }
+        void RefreshUpdateIndicator(bool tick)
+        {
+            if (!update.Visible || !Visible || WindowState == FormWindowState.Minimized || updateDialogOpen || closing || availableRelease == null) updateFlashTicks = 0;
+            bool flash = updateFlashTicks > 0 && updateFlashTicks % 2 == 0;
+            if (tick && updateFlashTicks > 0) updateFlashTicks--;
+            bool attention = availableRelease != null;
+            update.Fill = attention ? Theme.Mix(Theme.Input, Theme.Accent, flash ? .28f : .10f) : Theme.Input;
+            update.ForeColor = attention ? Theme.Accent : Theme.Muted;
+            if (update.AttentionDot != attention) { update.AttentionDot = attention; update.Invalidate(); }
         }
         int ActiveAnimations { get { int count = 0; foreach (var button in AllActionButtons(this)) if (button.Animating) count++; return count + (progress.Animating ? 1 : 0) + (badge.Animating ? 1 : 0); } }
         void SetState(string text, TrayState? explicitState = null)
         {
             var status = explicitState ?? (recorder != null && recorder.Running ? TrayState.Recording : TrayState.Idle);
             state.Text = text.StartsWith(L.T("Сохранено:")) ? L.T("Повтор сохранён") : text;
-            stateDetail.Text = text.StartsWith(L.T("Сохранено:")) ? text.Substring(L.T("Сохранено:").Length).Trim() + L.T("\nЗапись продолжается. Новые кадры остаются для следующего повтора.") : status == TrayState.Saving ? L.T("Дождитесь завершения текущего действия.") : status == TrayState.Recording ? L.T("Сохраните нужный момент кнопкой или горячей клавишей.\nЗапись продолжается, даже если закрыть окно.") : status == TrayState.Error ? L.T("Проверьте экран, звук и папку сохранения.\nЗатем повторите запуск.") : L.T("Включите запись до нужного момента.\nЗатем сохраните уже записанный фрагмент.");
+            stateDetail.Text = text.StartsWith(L.T("Сохранено:")) ? text.Substring(L.T("Сохранено:").Length).Trim() + L.T("\nЗапись продолжается. Новые кадры остаются для следующего повтора.") : status == TrayState.Saving ? L.T("Дождитесь завершения текущего действия.") : status == TrayState.Recording ? L.T("Сохраните последние моменты кнопкой или сочетанием клавиш.\nЗапись продолжится, если скрыть окно в трей.") : status == TrayState.Error ? L.T("Проверьте экран, звук и папку сохранения.\nЗатем повторите запуск.") : L.T("Включите запись до игры или нужного события.\nСохранить можно уже записанный фрагмент из буфера.");
             if (text == L.T("Накапливаем первые кадры…")) stateDetail.Text = L.T("Запись началась. Через несколько секунд\nпоявится возможность сохранить первый повтор.");
             if (status == TrayState.Recording && recorder != null && recorder.AudioDegraded && !text.StartsWith(L.T("Сохранено:"))) stateDetail.Text = L.T("Звук: ") + recorder.AudioSummary + L.T(". Запись продолжается.\nНедоступные устройства подключатся автоматически.");
             if (status == TrayState.Idle && !SelectedMonitorSupported)
@@ -220,11 +244,12 @@ namespace ReplayLite
             hotkey.Enabled = !busy && !closing;
             update.Enabled = !busy && !saving && !closing && !updating;
             trayUpdate.Enabled = update.Enabled;
+            RefreshUpdateIndicator(false);
             UpdateHotkeyLabels();
         }
         void UpdateSaveAvailability(double seconds)
         { bufferReady = seconds > 0; save.Enabled = recorder != null && recorder.Running && bufferReady && !recoveryPending && !busy && !saving && !closing; traySave.Enabled = save.Enabled; }
-        void Restore() { Show(); WindowState = FormWindowState.Normal; Activate(); }
+        void Restore() { Show(); WindowState = FormWindowState.Normal; Activate(); if (!testing && UpdateCheckDue(DateTime.UtcNow)) { var pending = CheckForUpdates(); } }
         void OpenFolder() { Directory.CreateDirectory(settings.Folder); Process.Start("explorer.exe", Recorder.Quote(settings.Folder)); }
         void Inputs(bool enabled) { foreach (var control in new Control[] { duration, fps, sound, rate, display, browse }) control.Enabled = enabled; AdvancedInputs(enabled); settingsNote.ForeColor = Theme.Muted; settingsNote.Text = enabled ? "" : L.T("Для изменения остановите запись"); }
         void RefreshMonitors()
@@ -347,7 +372,8 @@ namespace ReplayLite
         async Task RefreshState()
         {
             if (Native.SessionEnding) return;
-            if (!testing && !closing && !released && DateTime.UtcNow >= nextUpdateCheck) { var pending = CheckForUpdates(); }
+            RefreshUpdateIndicator(true);
+            if (!testing && UpdateCheckDue(DateTime.UtcNow)) { var pending = CheckForUpdates(); }
             if (recorder == null || busy || closing) return;
             if (recoveryPending)
             { if (!saving && DateTime.UtcNow >= nextRecovery) await TryRecoverCapture(); return; }
@@ -596,7 +622,7 @@ namespace ReplayLite
             report.AppendLine("SHUTDOWN_QUERY_BLOCKS_CAPTURE_AND_ERRORS_CANCEL_RESUMES: PASS");
             report.AppendLine("CONFIRMED_SHUTDOWN_STOPS_CHILDREN_AND_TRAY_SYNCHRONOUSLY: PASS");
             var newer = new ReleaseInfo { Version = new Version(99, 1, 2, 0) };
-            if (!SetAvailableRelease(newer) || !trayUpdate.Available || !update.Text.Contains("99.1.2") || update.AttentionDot || tray.Icon != icons[(int)TrayState.Update] || update.Image != brand || update.Size != new Size(48, 48) || SetAvailableRelease(newer)) throw new Exception("Compact logo update notification missing or repeated.");
+            if (!SetAvailableRelease(newer) || !trayUpdate.Available || !update.Text.Contains("99.1.2") || !update.AttentionDot || tray.Icon != icons[(int)TrayState.Update] || appLogo.Image != brand || update.Glyph != NavigationGlyph.Update || update.Size != new Size(36, 32) || update.Right >= settingsGear.Left || SetAvailableRelease(newer)) throw new Exception("Separate update button or deduplicated notice missing.");
             var updateMenu = (RoundedMenu)tray.ContextMenuStrip; updateMenu.Show(this, new Point(30, 100)); await Task.Delay(25); VerifyMenuForTest(updateMenu, true, 6); updateMenu.Close();
             if (SetAvailableRelease(new ReleaseInfo { Version = typeof(MainForm).Assembly.GetName().Version }) || trayUpdate.Available || availableRelease != null || update.AttentionDot) throw new Exception("Current version offered as an update.");
             report.AppendLine("UPDATE_NOTICE_NEW_VERSION_ONLY_NO_DUPLICATE: PASS");
@@ -842,10 +868,10 @@ namespace ReplayLite
                 {
                     ShowSettings(true); ShowAdvanced(true); ScrollAdvancedGroup(3); RefreshAudioChoices();
                     sound.SelectedIndex = 0; systemVolume.EditForTest(50); microphoneVolume.EditForTest(50);
-                    if (systemDevice.Items.Count > 1) systemDevice.SelectedIndex = 1;
                     if (microphoneDevice.Items.Count > 1) microphoneDevice.SelectedIndex = 1;
                     settings.BufferFolder = Path.Combine(root, L.T("Буфер с пробелами")); RefreshBufferFolder();
                     cursorCapture.Checked = false; saveNotice.Checked = false; saveSound.Checked = false;
+                    filenameTemplate.Text = "Клип-{date}-{time}"; SaveTemplate();
                 }
                 await Toggle();
                 if (recorder == null || !recorder.Running || trayState != TrayState.Recording || duration.Enabled) throw new Exception("Start controls or recording icon failed.");
@@ -853,19 +879,26 @@ namespace ReplayLite
                 if (advanced)
                 {
                     string session = (string)typeof(Recorder).GetField("session", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(recorder);
-                    if (Path.GetDirectoryName(session) != settings.BufferFolder || !Directory.Exists(session) || advancedGroups[1].Enabled || recorder.Config.CaptureCursor || recorder.Config.SystemVolume != 50) throw new Exception("Advanced live parameters were not applied.");
+                    if (Path.GetDirectoryName(session) != settings.BufferFolder || !Directory.Exists(session) || advancedGroups[1].Enabled || recorder.Config.CaptureCursor || recorder.Config.SystemVolume != 50 || recorder.Config.SystemDevice != "") throw new Exception("Advanced live parameters were not applied.");
                     int pid = recorder.ProcessId; ScrollAdvancedGroup(5); Hide();
                     await Task.Delay(500); Restore(); if (recorder.ProcessId != pid || ActiveAnimations != 0) throw new Exception("Advanced navigation restarted capture or left animations.");
+                    languageChoice.SelectedIndex = 1;
+                    foreach (int palette in new[] { 1, 2, 3, 0 }) themeChoice.SelectedIndex = palette;
+                    await Task.Delay(250);
+                    if (recorder.ProcessId != pid || !recorder.Running || L.Language != "en" || filenameTemplate.Text != "Клип-{date}-{time}" || bufferFolder.Text != settings.BufferHome) throw new Exception("Live language/theme change interrupted recording or changed user data.");
+                    report.AppendLine("LIVE_RU_EN_FOUR_PALETTES_NO_CAPTURE_RESTART_DEFAULT_SYSTEM_DEVICE: PASS");
                     report.AppendLine("LIVE_ADVANCED_CUSTOM_BUFFER_EXPLICIT_AUDIO_VOLUME_CURSOR_AND_TRAY: PASS");
                 }
                 for (int i = 0; i < 6; i++) { await Task.Delay(1000); await RefreshState(); }
                 await SaveReplay();
                 if (lastReplay == null || !File.Exists(lastReplay) || !openLast.Enabled || traySave.Enabled != (recorder.BufferedSeconds > 0) || trayState != TrayState.Recording) throw new Exception("Save action or tray state failed.");
                 report.AppendLine("LIVE_SAVE_ACTIONS_AND_TRAY: PASS");
+                if (advanced && !Path.GetFileName(lastReplay).StartsWith("Клип-", StringComparison.Ordinal)) throw new Exception("English export changed the user filename.");
                 if (recorder.BufferedSeconds > 2.1 || progress.Value > 2.1f / settings.Seconds || progress.Animating) throw new Exception("Saved buffer was not reset in the UI.");
                 report.AppendLine("LIVE_BUFFER_COUNTER_AND_PROGRESS_RESET: PASS");
                 await Toggle();
                 if (recorder != null || trayState != TrayState.Idle || traySave.Enabled || !duration.Enabled || !browse.Enabled) throw new Exception("Stop controls or idle icon failed.");
+                if (advanced) languageChoice.SelectedIndex = 0;
                 report.AppendLine("LIVE_STOP_ACTIONS_AND_TRAY: PASS");
             }
             catch (Exception error) { failure = error; }

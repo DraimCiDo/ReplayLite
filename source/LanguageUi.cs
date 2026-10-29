@@ -17,7 +17,7 @@ namespace ReplayLite
             if (released || closing) return;
             settings.Language = L.Language;
             foreach (var pair in localizedTips) if (!pair.Key.IsDisposed) tips.SetToolTip(pair.Key, pair.Key is PathDisplay || pair.Key == folder || pair.Key == openFolder ? pair.Value : L.T(pair.Value));
-            foreach (var select in new[] { duration, fps, sound, display, systemDevice, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) if (select != null) select.SelectedIndex = select.SelectedIndex;
+            foreach (var select in new[] { duration, fps, sound, display, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) if (select != null) select.SelectedIndex = select.SelectedIndex;
             badge.Set(L.T(L.Canonical(badge.Text)), trayState == TrayState.Recording ? Theme.Accent : trayState == TrayState.Saving ? Theme.Blue : trayState == TrayState.Error ? Theme.Red : Theme.Muted);
             SetTrayCaption(trayCaption); UpdateOptionsSummary(); SetAvailableRelease(availableRelease);
             if (advancedOptions != null) SelectSettingsTab(settingsTab);

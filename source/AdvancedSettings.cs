@@ -13,7 +13,7 @@ namespace ReplayLite
         ActionButton bufferBrowse, advancedReset;
         readonly List<ActionButton> settingsTabs = new List<ActionButton>();
         SettingsScrollPanel advancedScroll; Panel[] advancedGroups;
-        SelectBox systemDevice, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice;
+        SelectBox microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice;
         RangeBox systemVolume, microphoneVolume, freeSpace, feedbackVolume;
         ToggleSwitch cursorCapture, stopLowSpace, saveNotice, saveSound, systemEnabled, microphoneEnabled, checkUpdates, closeTray, minimized;
         PathDisplay bufferFolder, outputFolder; TextField filenameTemplate; Label filenamePreview, scalingWarning, advancedNote;
@@ -22,6 +22,7 @@ namespace ReplayLite
         readonly string[] settingsTitles = { L.T("Экран и буфер"), L.T("Сохранение клипов"), L.T("Видео"), L.T("Звук"), L.T("Клавиши и отклик"), L.T("Приложение и Windows") };
         void InitializePreferenceInputs()
         {
+            settings.SystemDevice = ""; // System audio follows Windows; retain legacy file parsing for compatibility.
             RefreshMonitors();
             duration.Items.AddRange(new object[] { L.T("30 секунд"), L.T("2 минуты"), L.T("5 минут"), L.T("10 минут") }); duration.SelectedIndex = settings.Seconds == 30 ? 0 : settings.Seconds == 300 ? 2 : settings.Seconds == 600 ? 3 : 1;
             sound.Items.AddRange(new object[] { L.T("Компьютер и микрофон"), L.T("Только звук компьютера"), L.T("Без звука"), L.T("Только микрофон") }); sound.SelectedIndex = settings.Audio == "none" ? 2 : settings.Audio == "system" ? 1 : settings.Audio == "microphone" ? 3 : 0;
@@ -44,7 +45,7 @@ namespace ReplayLite
             };
             foreach (var select in new[] { duration, fps, sound, display }) select.SelectedIndexChanged += CaptureOptionsChanged;
             rate.ValueChanged += CaptureOptionsChanged;
-            Tip(settingsGear, L.T("Настройки")); Tip(settingsBack, L.T("Вернуться на главную")); Tip(update, L.T("Проверить обновления · нажмите на логотип"));
+            Tip(settingsGear, L.T("Настройки")); Tip(settingsBack, L.T("Вернуться на главную")); Tip(update, L.T("Проверить обновления"));
         }
         void BuildAdvancedSettings()
         {
@@ -59,57 +60,57 @@ namespace ReplayLite
                 button.Glyph = (NavigationGlyph)((int)NavigationGlyph.Monitor + i); button.AccessibleName = settingsTitles[i]; Tip(button, settingsTitles[i]); button.Click += delegate { SelectSettingsTab(tab); }; settingsTabs.Add(button);
             }
             var capture = advancedGroups[0];
-            AdvancedField(capture, L.T("Монитор"), display, 0, 0, L.T("Записывается выбранный экран. Для NVENC нужен монитор на NVIDIA."));
+            AdvancedField(capture, L.T("Монитор"), display, 0, 0, L.T("Выберите экран для записи. Монитор должен быть подключён к видеокарте NVIDIA."));
             var refresh = new ActionButton(); StyleButton(refresh, L.T("Обновить мониторы"), capture, 344, 20, 314, 32, false); refresh.Font = new Font("Segoe UI", 9); refresh.Click += delegate { RefreshMonitors(); };
-            AdvancedField(capture, L.T("Длительность буфера"), duration, 0, 62, L.T("Хранятся последние секунды записи. Сохранить можно и неполный буфер."));
-            cursorCapture = new ToggleSwitch(); AdvancedToggle(capture, cursorCapture, L.T("Записывать курсор"), 344, 82, L.T("Включает курсор в видеозаписи."));
+            AdvancedField(capture, L.T("Длительность буфера"), duration, 0, 62, L.T("Сколько последних секунд хранить до сохранения клипа. Если запись началась недавно, сохранится доступный фрагмент."));
+            cursorCapture = new ToggleSwitch(); AdvancedToggle(capture, cursorCapture, L.T("Записывать курсор"), 344, 82, L.T("Добавляет указатель мыши в записанное видео."));
             bufferFolder = new PathDisplay(); bufferBrowse = new ActionButton();
-            HelpLabel(capture, L.T("Папка временного буфера"), 0, 126, L.T("Сжатые сегменты хранятся на диске. Не выбирайте медленный или сетевой диск."));
+            HelpLabel(capture, L.T("Папка временного буфера"), 0, 126, L.T("Здесь хранится временная запись до сохранения клипа. Выбирайте быстрый локальный диск со свободным местом."));
             bufferFolder.SetBounds(0, 146, 536, 34); capture.Controls.Add(bufferFolder); StyleButton(bufferBrowse, L.T("Выбрать"), capture, 548, 146, 110, 34, false);
             bufferBrowse.Click += delegate { using (var dialog = new FolderBrowserDialog { SelectedPath = settings.BufferHome, Description = L.T("Папка временного буфера") }) if (dialog.ShowDialog(this) == DialogResult.OK) { settings.BufferFolder = dialog.SelectedPath; RefreshBufferFolder(); AdvancedChanged(bufferBrowse, EventArgs.Empty); } };
             freeSpace = new RangeBox { Minimum = 128, Maximum = 10240 }; stopLowSpace = new ToggleSwitch();
-            AdvancedField(capture, L.T("Резерв диска · МБ"), freeSpace, 0, 196, L.T("Запись останавливается при достижении резерва. Минимальный аварийный запас всегда 128 МБ."));
-            AdvancedToggle(capture, stopLowSpace, L.T("Контролировать резерв"), 344, 216, L.T("Остановка буфера при недостатке свободного места."));
+            AdvancedField(capture, L.T("Резерв диска · МБ"), freeSpace, 0, 196, L.T("Сколько места оставить свободным на диске буфера. Аварийный запас 128 МБ действует всегда."));
+            AdvancedToggle(capture, stopLowSpace, L.T("Контролировать резерв"), 344, 216, L.T("Останавливает запись, когда на диске остаётся меньше места, чем указано в резерве."));
 
             var output = advancedGroups[1]; outputFolder = new PathDisplay();
-            HelpLabel(output, L.T("Папка клипов"), 0, 0, L.T("Здесь появляются только успешно сохранённые клипы.")); outputFolder.SetBounds(0, 20, 536, 34); output.Controls.Add(outputFolder);
+            HelpLabel(output, L.T("Папка клипов"), 0, 0, L.T("Сюда сохраняются готовые клипы по кнопке или горячей клавише. Временный буфер хранится отдельно.")); outputFolder.SetBounds(0, 20, 536, 34); output.Controls.Add(outputFolder);
             StyleButton(browse, L.T("Выбрать"), output, 548, 20, 110, 34, false); folder.TextChanged += delegate { outputFolder.Text = folder.Text; Tip(outputFolder, folder.Text); }; outputFolder.Text = folder.Text; Tip(outputFolder, folder.Text);
-            containerChoice = Choice(new[] { "MP4", "MKV" }, settings.Container == "mkv" ? 1 : 0); AdvancedField(output, L.T("Формат файла"), containerChoice, 0, 70, L.T("Контейнер меняется без перекодирования. MP4 удобен для публикации, MKV — для монтажа."));
-            var presets = Choice(new[] { L.T("Дата и время"), L.T("Монитор, дата и время"), L.T("Своё имя") }, 2); AdvancedField(output, L.T("Шаблон"), presets, 344, 70, L.T("Выберите готовый шаблон или отредактируйте имя ниже."));
+            containerChoice = Choice(new[] { "MP4", "MKV" }, settings.Container == "mkv" ? 1 : 0); AdvancedField(output, L.T("Формат файла"), containerChoice, 0, 70, L.T("MP4 открывается в большинстве плееров и сервисов. MKV — альтернативный контейнер. Формат не меняет качество видео."));
+            var presets = Choice(new[] { L.T("Дата и время"), L.T("Монитор, дата и время"), L.T("Своё имя") }, 2); AdvancedField(output, L.T("Шаблон"), presets, 344, 70, L.T("Выберите готовый вариант имени или задайте свой в поле ниже."));
             filenameTemplate = new TextField { Text = settings.FilenameTemplate, BackColor = Theme.Card, ForeColor = Theme.Text, Font = new Font("Segoe UI", 10), MaxLength = 100 };
-            HelpLabel(output, L.T("Имя клипа"), 0, 136, L.T("Токены: {date}, {time}, {monitor}, {YYYY-MM-DD_HH-MM-SS}. Расширение добавляется автоматически; совпавшие имена получают номер.")); AddInput(output, filenameTemplate, 0, 158, 658, L.T("Шаблон имени клипа")); filenameTemplate.Height = 34;
+            HelpLabel(output, L.T("Имя клипа"), 0, 136, L.T("Вставьте {date} для даты, {time} для времени, {monitor} для номера экрана. Также доступен {YYYY-MM-DD_HH-MM-SS}. Расширение добавится само; одинаковые имена получат номер.")); AddInput(output, filenameTemplate, 0, 158, 658, L.T("Шаблон имени клипа")); filenameTemplate.Height = 34;
             filenamePreview = LabelAt(output, "", 0, 198, 658, 28, 9, false, Theme.Muted);
             presets.SelectedIndexChanged += delegate { if (presets.SelectedIndex < 2) { filenameTemplate.Text = presets.SelectedIndex == 0 ? "Replay-{date}_{time}" : "Replay-{monitor}-{date}_{time}"; SaveTemplate(); } };
             filenameTemplate.TextChanged += delegate { PreviewFilename(); }; filenameTemplate.Leave += delegate { SaveTemplate(); }; filenameTemplate.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { SaveTemplate(); e.SuppressKeyPress = true; } };
 
             var video = advancedGroups[2];
-            AdvancedField(video, L.T("Частота кадров"), fps, 0, 0, L.T("30 FPS экономнее, 60 FPS плавнее. Частота не превышает возможности источника."));
+            AdvancedField(video, L.T("Частота кадров"), fps, 0, 0, L.T("30 кадров/с снижает нагрузку. 60 кадров/с делает движение плавнее, но требует больше ресурсов."));
             resolutionChoice = Choice(new[] { L.T("Исходное · GPU"), L.T("До 1920 × 1080 · CPU"), L.T("До 1280 × 720 · CPU") }, settings.Resolution == "720" ? 2 : settings.Resolution == "1080" ? 1 : 0);
-            AdvancedField(video, L.T("Разрешение"), resolutionChoice, 344, 0, L.T("Пропорции сохраняются, увеличение отключено. Масштабирование копирует кадры в RAM и нагружает CPU; исходное разрешение этого не делает."));
-            codecChoice = Choice(new[] { "H.264 · NVENC", "HEVC · NVENC", "AV1 · NVENC" }, settings.Codec == "av1" ? 2 : settings.Codec == "hevc" ? 1 : 0); AdvancedField(video, L.T("Кодек"), codecChoice, 0, 66, L.T("Только аппаратный NVENC. HEVC/AV1 требуют совместимую NVIDIA; при отсутствии поддержки запись сообщает ошибку без перехода на CPU."));
-            AdvancedField(video, L.T("Битрейт · Мбит/с"), rate, 344, 66, L.T("Целевой битрейт. Большие значения увеличивают качество и размер буфера."));
-            controlChoice = Choice(new[] { L.T("CBR · постоянный"), L.T("VBR · переменный") }, settings.RateControl == "vbr" ? 1 : 0); AdvancedField(video, L.T("Управление битрейтом"), controlChoice, 0, 132, L.T("CBR стремится к заданному битрейту; VBR экономит место на простых сценах, верхняя граница — выбранный битрейт."));
+            AdvancedField(video, L.T("Разрешение"), resolutionChoice, 344, 0, L.T("Исходное разрешение сохраняет размер экрана и обработку на GPU. Уменьшение до 1080p или 720p сохраняет пропорции, но дополнительно нагружает CPU и память."));
+            codecChoice = Choice(new[] { "H.264 · NVENC", "HEVC · NVENC", "AV1 · NVENC" }, settings.Codec == "av1" ? 2 : settings.Codec == "hevc" ? 1 : 0); AdvancedField(video, L.T("Кодек"), codecChoice, 0, 66, L.T("Видео сжимается на видеокарте через NVENC. H.264 совместим с большинством устройств. Для HEVC и AV1 нужна поддержка видеокарты и плеера."));
+            AdvancedField(video, L.T("Битрейт · Мбит/с"), rate, 344, 66, L.T("Больше битрейт — меньше потерь в деталях, но крупнее клипы и временный буфер."));
+            controlChoice = Choice(new[] { L.T("CBR · постоянный"), L.T("VBR · переменный") }, settings.RateControl == "vbr" ? 1 : 0); AdvancedField(video, L.T("Управление битрейтом"), controlChoice, 0, 132, L.T("CBR держит примерно постоянный поток данных. VBR уменьшает его на простых сценах; выбранный битрейт задаёт верхний предел."));
             scalingWarning = LabelAt(video, "", 344, 152, 314, 66, 9, false, Theme.Red);
 
             var audio = advancedGroups[3]; systemEnabled = new ToggleSwitch(); microphoneEnabled = new ToggleSwitch();
-            AdvancedToggle(audio, systemEnabled, L.T("Звук компьютера"), 0, 0, L.T("Записывать звук выбранного устройства вывода.")); AdvancedToggle(audio, microphoneEnabled, L.T("Микрофон"), 344, 0, L.T("Записывать выбранный микрофон. Можно включить без звука компьютера."));
-            systemDevice = new SelectBox(); microphoneDevice = new SelectBox(); systemVolume = new RangeBox(); microphoneVolume = new RangeBox();
-            AdvancedField(audio, L.T("Устройство вывода"), systemDevice, 0, 44, L.T("По умолчанию следует за системным устройством. Отсутствующее устройство заменяется тишиной до возвращения.")); AdvancedField(audio, L.T("Устройство микрофона"), microphoneDevice, 344, 44, L.T("Список обновляется при открытии вкладки. Недоступное выбранное устройство не заменяется другим микрофоном."));
-            AdvancedField(audio, L.T("Громкость компьютера · %"), systemVolume, 0, 112, L.T("Громкость в записи; системная громкость Windows не меняется.")); AdvancedField(audio, L.T("Громкость микрофона · %"), microphoneVolume, 344, 112, L.T("Громкость в записи; 0% — тишина."));
+            AdvancedToggle(audio, systemEnabled, L.T("Звук компьютера"), 0, 0, L.T("Записывает звук игр и приложений с устройства Windows по умолчанию.")); AdvancedToggle(audio, microphoneEnabled, L.T("Микрофон"), 344, 0, L.T("Добавляет голос с выбранного микрофона. Работает и без звука компьютера."));
+            microphoneDevice = new SelectBox(); systemVolume = new RangeBox(); microphoneVolume = new RangeBox();
+            AdvancedField(audio, L.T("Громкость компьютера · %"), systemVolume, 0, 52, L.T("Меняет громкость звука компьютера только в клипе. На громкость Windows не влияет.")); AdvancedField(audio, L.T("Громкость микрофона · %"), microphoneVolume, 344, 52, L.T("Меняет громкость голоса только в клипе. При 0% голос не слышен."));
+            AdvancedField(audio, L.T("Устройство микрофона"), microphoneDevice, 344, 122, L.T("Выберите микрофон для записи голоса. Если он отключится, видео продолжится без него до подключения."));
 
-            var feedback = advancedGroups[4]; AdvancedField(feedback, L.T("Сохранить повтор"), hotkey, 0, 0, L.T("Нажмите поле, затем сочетание. Клавиши работают глобально; занятые сочетания не сохраняются."));
+            var feedback = advancedGroups[4]; AdvancedField(feedback, L.T("Сохранить повтор"), hotkey, 0, 0, L.T("Нажмите поле и введите клавишу или сочетание. Оно сохранит клип даже во время игры. Занятое сочетание не заменит прежнее."));
             hotkeyInfo.SetBounds(0, 60, 318, 48); feedback.Controls.Add(hotkeyInfo);
-            toneChoice = Choice(new[] { L.T("Короткий сигнал"), L.T("Две ноты"), L.T("Мягкий сигнал") }, settings.FeedbackTone); AdvancedField(feedback, L.T("Звук сохранения"), toneChoice, 344, 0, L.T("Короткий сигнал воспроизводится только после успешного сохранения."));
-            feedbackVolume = new RangeBox(); AdvancedField(feedback, L.T("Громкость сигнала · %"), feedbackVolume, 344, 68, L.T("Отдельная громкость сигнала. Громкость Windows не меняется."));
-            saveNotice = new ToggleSwitch(); saveSound = new ToggleSwitch(); AdvancedToggle(feedback, saveNotice, L.T("Уведомление о сохранении"), 0, 128, L.T("Показывает системное уведомление после сохранения.")); AdvancedToggle(feedback, saveSound, L.T("Звук после сохранения"), 344, 128, L.T("Включает выбранный сигнал после успешного экспорта."));
+            toneChoice = Choice(new[] { L.T("Короткий сигнал"), L.T("Две ноты"), L.T("Мягкий сигнал") }, settings.FeedbackTone); AdvancedField(feedback, L.T("Звук сохранения"), toneChoice, 344, 0, L.T("Выберите сигнал, который прозвучит после сохранения готового клипа. Его можно проверить кнопкой ниже."));
+            feedbackVolume = new RangeBox(); AdvancedField(feedback, L.T("Громкость сигнала · %"), feedbackVolume, 344, 68, L.T("Меняет громкость сигнала сохранения. При 0% сигнала не слышно; громкость Windows не меняется."));
+            saveNotice = new ToggleSwitch(); saveSound = new ToggleSwitch(); AdvancedToggle(feedback, saveNotice, L.T("Уведомление о сохранении"), 0, 128, L.T("Показывает уведомление Windows, когда клип успешно сохранён.")); AdvancedToggle(feedback, saveSound, L.T("Звук после сохранения"), 344, 128, L.T("Воспроизводит выбранный сигнал, когда клип успешно сохранён."));
             var listen = new ActionButton(); StyleButton(listen, L.T("Прослушать"), feedback, 344, 174, 150, 32, false); listen.Font = new Font("Segoe UI", 9); listen.Click += async delegate { listen.Enabled = false; try { await SaveFeedback.PlayAsync(toneChoice.SelectedIndex, feedbackVolume.Value); } finally { if (!listen.IsDisposed) listen.Enabled = true; } };
 
             var system = advancedGroups[5]; checkUpdates = new ToggleSwitch(); closeTray = new ToggleSwitch(); minimized = new ToggleSwitch();
-            AdvancedToggle(system, startup, L.T("Запускать с Windows"), 0, 0, L.T("Автозапуск в трее с включённым буфером. Применяется сразу."));
-            AdvancedToggle(system, checkUpdates, L.T("Проверять обновления при запуске"), 344, 0, L.T("Если доступна новая версия, появится уведомление и отметка на логотипе. Если обновления нет — ничего не показывается."));
-            AdvancedToggle(system, closeTray, L.T("Закрывать в трей"), 0, 48, L.T("Выключено: крестик завершает запись и приложение. Выход из меню трея всегда закрывает приложение.")); AdvancedToggle(system, minimized, L.T("Запускать свёрнутым"), 344, 48, L.T("Следующий обычный запуск откроет приложение в трее без автоматического включения буфера."));
-            themeChoice = Choice(new[] { L.T("Мята · тёмная"), L.T("Океан · тёмная"), L.T("Лаванда · тёмная"), L.T("Светлая") }, Array.IndexOf(new[] { "mint", "ocean", "violet", "light" }, settings.Palette)); AdvancedField(system, L.T("Тема приложения"), themeChoice, 0, 96, L.T("Готовая палитра применяется сразу ко всему окну и сохраняется."));
-            languageChoice = Choice(new[] { L.T("Русский"), "English" }, settings.Language == "en" ? 1 : 0); AdvancedField(system, L.T("Язык приложения"), languageChoice, 344, 96, L.T("Язык интерфейса и уведомлений. Применяется сразу, запись не перезапускается."));
+            AdvancedToggle(system, startup, L.T("Запускать с Windows"), 0, 0, L.T("Запускает ReplayLite вместе с Windows и сразу включает запись в фоне."));
+            AdvancedToggle(system, checkUpdates, L.T("Проверять обновления автоматически"), 344, 0, L.T("Проверяет GitHub при запуске и раз в 5 минут. Кнопка подсветится, когда найдётся новая версия. Установка — по нажатию."));
+            AdvancedToggle(system, closeTray, L.T("Закрывать в трей"), 0, 48, L.T("Крестик скрывает окно, а запись продолжается. Если выключить, крестик завершит приложение. Для полного выхода также есть пункт в трее.")); AdvancedToggle(system, minimized, L.T("Запускать свёрнутым"), 344, 48, L.T("При обычном запуске окно останется в трее. Запись сама не включится; автозапуск с Windows настраивается отдельно."));
+            themeChoice = Choice(new[] { L.T("Мята · тёмная"), L.T("Океан · тёмная"), L.T("Лаванда · тёмная"), L.T("Светлая") }, Array.IndexOf(new[] { "mint", "ocean", "violet", "light" }, settings.Palette)); AdvancedField(system, L.T("Тема приложения"), themeChoice, 0, 96, L.T("Меняет фон, карточки, поля, кнопки и значки. Применяется сразу и сохраняется для следующего запуска."));
+            languageChoice = Choice(new[] { L.T("Русский"), "English" }, settings.Language == "en" ? 1 : 0); AdvancedField(system, L.T("Язык приложения"), languageChoice, 344, 96, L.T("Меняет язык меню, подсказок и уведомлений. Текущая запись продолжится без перезапуска."));
             startupInfo.SetBounds(0, 166, 658, 46); system.Controls.Add(startupInfo);
 
             advancedNote = settingsNote; advancedNote.BackColor = Theme.Card; advancedNote.ForeColor = Theme.Muted; advancedNote.Font = new Font("Segoe UI", 8); advancedNote.SetBounds(16, 282, 510, 28); advancedOptions.Controls.Add(advancedNote);
@@ -120,7 +121,7 @@ namespace ReplayLite
             systemEnabled.Checked = settings.Audio == "both" || settings.Audio == "system"; microphoneEnabled.Checked = settings.Audio == "both" || settings.Audio == "microphone";
             checkUpdates.Checked = settings.CheckUpdatesOnStartup; closeTray.Checked = settings.CloseToTray; minimized.Checked = settings.StartMinimized;
             RefreshAudioChoices(); RefreshBufferFolder(); PreviewFilename(); UpdateScalingWarning();
-            foreach (var select in new[] { systemDevice, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) select.SelectedIndexChanged += AdvancedChanged;
+            foreach (var select in new[] { microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) select.SelectedIndexChanged += AdvancedChanged;
             foreach (var range in new[] { systemVolume, microphoneVolume, freeSpace, feedbackVolume }) range.ValueCommitted += AdvancedChanged;
             foreach (var toggle in new[] { cursorCapture, stopLowSpace, saveNotice, saveSound, systemEnabled, microphoneEnabled, checkUpdates, closeTray, minimized }) toggle.CheckedChanged += AdvancedChanged;
             advancedScroll.AttachWheelHandlers(); advancedSync = false; SelectSettingsTab(0); AdvancedInputs(recorder == null && !busy);
@@ -134,7 +135,7 @@ namespace ReplayLite
         { HelpLabel(parent, text, x, y, help); AddInput(parent, input, x, y + 22, 314, text); input.Height = input is RangeBox ? 36 : 32; }
         void AdvancedToggle(Control parent, ToggleSwitch input, string text, int x, int y, string help)
         { input.Text = input.AccessibleName = text; input.HelpIcon = true; input.Font = new Font("Segoe UI", 9); input.BackColor = Theme.Card; input.ForeColor = Theme.Text; input.SetBounds(x, y, 314, 32); parent.Controls.Add(input); Tip(input, help); }
-        void RefreshBufferFolder() { bufferFolder.Text = string.IsNullOrEmpty(settings.BufferFolder) ? L.T("По умолчанию") : settings.BufferFolder; Tip(bufferFolder, settings.BufferHome); }
+        void RefreshBufferFolder() { bufferFolder.Text = settings.BufferHome; Tip(bufferFolder, settings.BufferHome); }
         void PreviewFilename()
         {
             bool valid = Settings.ValidTemplate(filenameTemplate.Text); filenamePreview.ForeColor = valid ? Theme.Muted : Theme.Red;
@@ -144,7 +145,7 @@ namespace ReplayLite
         void SaveTemplate() { if (!Settings.ValidTemplate(filenameTemplate.Text)) { PreviewFilename(); return; } settings.FilenameTemplate = filenameTemplate.Text; AdvancedChanged(filenameTemplate, EventArgs.Empty); }
         void UpdateScalingWarning() { scalingWarning.Text = resolutionChoice.SelectedIndex == 0 ? "" : L.T("Масштабирование через CPU\nПовышает нагрузку и расход RAM"); }
         void RefreshAudioChoices()
-        { bool previous = advancedSync; advancedSync = true; try { FillAudioChoices(systemDevice, true, settings.SystemDevice); FillAudioChoices(microphoneDevice, false, settings.MicrophoneDevice); } finally { advancedSync = previous; } }
+        { bool previous = advancedSync; advancedSync = true; try { FillAudioChoices(microphoneDevice, false, settings.MicrophoneDevice); } finally { advancedSync = previous; } }
         static void FillAudioChoices(SelectBox select, bool system, string id)
         { select.ClosePopup(); select.Items.Clear(); foreach (var choice in AudioChoice.Enumerate(system, id)) select.Items.Add(choice); select.SelectedIndex = select.Items.FindIndex(item => ((AudioChoice)item).Id == id); if (select.SelectedIndex < 0) select.SelectedIndex = 0; }
         void SelectSettingsTab(int tab)
@@ -157,7 +158,7 @@ namespace ReplayLite
         void ShowAdvanced(bool show) { if (advancedOptions == null) BuildAdvancedSettings(); advancedOptions.Visible = true; SelectSettingsTab(show ? 3 : settingsTab); UpdateNavigation(); }
         void CloseSettingsPopups()
         {
-            foreach (var select in new[] { duration, fps, sound, display, systemDevice, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) if (select != null) select.ClosePopup();
+            foreach (var select in new[] { duration, fps, sound, display, microphoneDevice, containerChoice, codecChoice, resolutionChoice, controlChoice, themeChoice, toneChoice, languageChoice }) if (select != null) select.ClosePopup();
         }
         void ScrollAdvancedGroup(int index) { SelectSettingsTab(index); }
         internal void PreviewAdvancedForDocs(int group) { testing = true; advancedPreviewGroup = Math.Max(0, Math.Min(5, group)); ShowSettings(true); SelectSettingsTab(advancedPreviewGroup); }
@@ -167,7 +168,7 @@ namespace ReplayLite
             if (advancedOptions == null) return;
             for (int i = 0; i < 4; i++) advancedGroups[i].Enabled = enabled;
             advancedReset.Enabled = enabled; freeSpace.Enabled = enabled && stopLowSpace.Checked;
-            systemDevice.Enabled = systemVolume.Enabled = enabled && systemEnabled.Checked; microphoneDevice.Enabled = microphoneVolume.Enabled = enabled && microphoneEnabled.Checked;
+            systemVolume.Enabled = enabled && systemEnabled.Checked; microphoneDevice.Enabled = microphoneVolume.Enabled = enabled && microphoneEnabled.Checked;
             advancedNote.Text = enabled ? "" : L.T("Для изменения записи остановите буфер"); advancedNote.ForeColor = Theme.Muted;
         }
         void AdvancedChanged(object sender, EventArgs e)
@@ -177,7 +178,7 @@ namespace ReplayLite
             if (capture && (recorder != null || busy)) return;
             if (capture)
             {
-                settings.SystemDevice = ((AudioChoice)systemDevice.Items[systemDevice.SelectedIndex]).Id; settings.MicrophoneDevice = ((AudioChoice)microphoneDevice.Items[microphoneDevice.SelectedIndex]).Id;
+                settings.SystemDevice = ""; settings.MicrophoneDevice = ((AudioChoice)microphoneDevice.Items[microphoneDevice.SelectedIndex]).Id;
                 settings.SystemVolume = systemVolume.Value; settings.MicrophoneVolume = microphoneVolume.Value; settings.FreeSpaceMb = freeSpace.Value; settings.StopWhenLowSpace = stopLowSpace.Checked; settings.CaptureCursor = cursorCapture.Checked;
                 settings.Container = containerChoice.SelectedIndex == 1 ? "mkv" : "mp4"; settings.Codec = new[] { "h264", "hevc", "av1" }[codecChoice.SelectedIndex]; settings.Resolution = new[] { "native", "1080", "720" }[resolutionChoice.SelectedIndex]; settings.RateControl = controlChoice.SelectedIndex == 1 ? "vbr" : "cbr";
                 advancedSync = true;
@@ -186,6 +187,7 @@ namespace ReplayLite
                 UpdateScalingWarning(); PreviewFilename();
             }
             settings.SaveNotification = saveNotice.Checked; settings.SaveSound = saveSound.Checked; settings.FeedbackVolume = feedbackVolume.Value; settings.FeedbackTone = toneChoice.SelectedIndex;
+            if (settings.CheckUpdatesOnStartup != checkUpdates.Checked) nextUpdateCheck = checkUpdates.Checked ? DateTime.MinValue : DateTime.MaxValue;
             settings.CheckUpdatesOnStartup = checkUpdates.Checked; settings.CloseToTray = closeTray.Checked; settings.StartMinimized = minimized.Checked; settings.Language = languageChoice.SelectedIndex == 1 ? "en" : "ru"; L.SetLanguage(settings.Language);
             string palette = new[] { "mint", "ocean", "violet", "light" }[themeChoice.SelectedIndex]; if (settings.Palette != palette) { settings.Palette = palette; ApplyPalette(palette); }
             StopAnimations(); AdvancedInputs(recorder == null && !busy); if (testing) { if (recorder == null && !busy) ReadCaptureOptions(); return; }
@@ -200,7 +202,7 @@ namespace ReplayLite
             try
             {
                 duration.SelectedIndex = 1; fps.SelectedIndex = 0; rate.Value = 8; systemEnabled.Checked = microphoneEnabled.Checked = true;
-                systemDevice.SelectedIndex = microphoneDevice.SelectedIndex = 0; systemVolume.Value = microphoneVolume.Value = 100; cursorCapture.Checked = stopLowSpace.Checked = true;
+                microphoneDevice.SelectedIndex = 0; systemVolume.Value = microphoneVolume.Value = 100; cursorCapture.Checked = stopLowSpace.Checked = true;
                 settings.BufferFolder = ""; RefreshBufferFolder(); freeSpace.Value = 128; containerChoice.SelectedIndex = codecChoice.SelectedIndex = resolutionChoice.SelectedIndex = controlChoice.SelectedIndex = themeChoice.SelectedIndex = toneChoice.SelectedIndex = 0;
                 settings.FilenameTemplate = "Replay-{date}_{time}"; filenameTemplate.Text = settings.FilenameTemplate; feedbackVolume.Value = 60;
                 saveNotice.Checked = checkUpdates.Checked = closeTray.Checked = true; saveSound.Checked = minimized.Checked = false;
@@ -210,9 +212,10 @@ namespace ReplayLite
         }
         void ApplyPalette(string palette)
         {
-            StopAnimations(); var before = new[] { Theme.Background, Theme.Card, Theme.Input, Theme.Border, Theme.Text, Theme.Muted, Theme.Accent, Theme.Red };
-            Theme.SetPalette(palette); var after = new[] { Theme.Background, Theme.Card, Theme.Input, Theme.Border, Theme.Text, Theme.Muted, Theme.Accent, Theme.Red };
+            StopAnimations(); var before = new[] { Theme.Background, Theme.Card, Theme.Input, Theme.Border, Theme.Text, Theme.Muted, Theme.Accent, Theme.Red, Theme.Blue, Theme.AccentText };
+            Theme.SetPalette(palette); var after = new[] { Theme.Background, Theme.Card, Theme.Input, Theme.Border, Theme.Text, Theme.Muted, Theme.Accent, Theme.Red, Theme.Blue, Theme.AccentText };
             Recolor(this, before, after); RebuildBranding(); WindowTheme.Apply(this);
+            save.Fill = Theme.Accent; save.ForeColor = Theme.AccentText;
             badge.Set(badge.Text, trayState == TrayState.Recording ? Theme.Accent : trayState == TrayState.Saving ? Theme.Blue : trayState == TrayState.Error ? Theme.Red : Theme.Muted); badge.FinishAnimation();
             SyncActions(); if (advancedOptions != null) SelectSettingsTab(settingsTab); Invalidate(true);
         }
