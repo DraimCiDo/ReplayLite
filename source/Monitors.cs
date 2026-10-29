@@ -9,7 +9,7 @@ namespace ReplayLite
     sealed class MonitorChoice
     {
         public string Id, DeviceName, Name; public int Adapter, Output, Width, Height, Rotation; public bool Primary, CanCapture; public IntPtr Handle;
-        public override string ToString() { return Name + " · " + Width + "×" + Height + (Primary ? " · основной" : "") + (!CanCapture ? " · не NVIDIA" : ""); }
+        public override string ToString() { return Name + " · " + Width + "×" + Height + (Primary ? L.T(" · основной") : "") + (!CanCapture ? L.T(" · не NVIDIA") : ""); }
     }
     static class MonitorCatalog
     {
@@ -85,7 +85,7 @@ namespace ReplayLite
                                 OutputDesc desc; if (Method<OutputDescription>(output, 7)(output, out desc) < 0 || desc.Attached == 0) continue;
                                 string[] friendly; names.TryGetValue(desc.DeviceName, out friendly);
                                 string number = desc.DeviceName.Replace(@"\\.\DISPLAY", "");
-                                result.Add(new MonitorChoice { Handle = desc.Monitor, Adapter = (int)a, Output = (int)o, Rotation = desc.Rotation == 2 ? -90 : desc.Rotation == 3 ? 180 : desc.Rotation == 4 ? 90 : 0, DeviceName = desc.DeviceName, Id = friendly != null && !string.IsNullOrEmpty(friendly[1]) ? friendly[1] : desc.DeviceName, Name = friendly != null && !string.IsNullOrWhiteSpace(friendly[0]) ? friendly[0] : "Монитор " + number, Width = desc.Desktop.Right - desc.Desktop.Left, Height = desc.Desktop.Bottom - desc.Desktop.Top, Primary = desc.Desktop.Left == 0 && desc.Desktop.Top == 0, CanCapture = adapterDesc.Vendor == 0x10de });
+                                result.Add(new MonitorChoice { Handle = desc.Monitor, Adapter = (int)a, Output = (int)o, Rotation = desc.Rotation == 2 ? -90 : desc.Rotation == 3 ? 180 : desc.Rotation == 4 ? 90 : 0, DeviceName = desc.DeviceName, Id = friendly != null && !string.IsNullOrEmpty(friendly[1]) ? friendly[1] : desc.DeviceName, Name = friendly != null && !string.IsNullOrWhiteSpace(friendly[0]) ? friendly[0] : L.T("Монитор ") + number, Width = desc.Desktop.Right - desc.Desktop.Left, Height = desc.Desktop.Bottom - desc.Desktop.Top, Primary = desc.Desktop.Left == 0 && desc.Desktop.Top == 0, CanCapture = adapterDesc.Vendor == 0x10de });
                             }
                             finally { Marshal.Release(output); }
                         }
@@ -95,7 +95,7 @@ namespace ReplayLite
             }
             catch (COMException) { }
             finally { if (factory != IntPtr.Zero) Marshal.Release(factory); }
-            if (result.Count == 0) foreach (var screen in Screen.AllScreens) result.Add(new MonitorChoice { DeviceName = screen.DeviceName, Id = screen.DeviceName, Name = "Монитор " + screen.DeviceName.Replace(@"\\.\DISPLAY", ""), Width = screen.Bounds.Width, Height = screen.Bounds.Height, Primary = screen.Primary, CanCapture = false });
+            if (result.Count == 0) foreach (var screen in Screen.AllScreens) result.Add(new MonitorChoice { DeviceName = screen.DeviceName, Id = screen.DeviceName, Name = L.T("Монитор ") + screen.DeviceName.Replace(@"\\.\DISPLAY", ""), Width = screen.Bounds.Width, Height = screen.Bounds.Height, Primary = screen.Primary, CanCapture = false });
             return result.OrderByDescending(m => m.Primary).ThenBy(m => m.DeviceName).ToList();
         }
     }

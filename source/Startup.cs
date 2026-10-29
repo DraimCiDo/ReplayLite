@@ -10,7 +10,7 @@ namespace ReplayLite
         internal static string Command(string executable)
         {
             string command = "\"" + Path.GetFullPath(executable) + "\" --startup";
-            if (command.Length > 260 || command.IndexOf('\r') >= 0 || command.IndexOf('\n') >= 0) throw new IOException("Путь программы слишком длинный для автозапуска Windows.");
+            if (command.Length > 260 || command.IndexOf('\r') >= 0 || command.IndexOf('\n') >= 0) throw new IOException(L.T("Путь программы слишком длинный для автозапуска Windows."));
             return command;
         }
         internal static bool Enabled(string executable, string registryPath = RunKey)

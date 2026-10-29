@@ -15,7 +15,7 @@ namespace ReplayLite
         public override string ToString() { return Name; }
         internal static List<AudioChoice> Enumerate(bool system, string selected)
         {
-            var result = new List<AudioChoice> { new AudioChoice { Id = "", Name = "Устройство по умолчанию" } };
+            var result = new List<AudioChoice> { new AudioChoice { Id = "", Name = L.T("Устройство по умолчанию") } };
             try
             {
                 using (var devices = new MMDeviceEnumerator())
@@ -23,7 +23,7 @@ namespace ReplayLite
                         using (device) result.Add(new AudioChoice { Id = device.ID, Name = device.FriendlyName });
             }
             catch (Exception) { /* Keep default and selected identity when audio service is unavailable. */ }
-            if (!string.IsNullOrEmpty(selected) && !result.Exists(c => c.Id == selected)) result.Add(new AudioChoice { Id = selected, Name = "Выбранное устройство недоступно" });
+            if (!string.IsNullOrEmpty(selected) && !result.Exists(c => c.Id == selected)) result.Add(new AudioChoice { Id = selected, Name = L.T("Выбранное устройство недоступно") });
             return result;
         }
     }
@@ -52,17 +52,17 @@ namespace ReplayLite
                 using (var devices = new MMDeviceEnumerator())
                 using (var device = string.IsNullOrEmpty(deviceId) ? devices.GetDefaultAudioEndpoint(system ? DataFlow.Render : DataFlow.Capture, system ? Role.Multimedia : Role.Console) : devices.GetDevice(deviceId))
                 {
-                    if (device.State != DeviceState.Active || device.DataFlow != (system ? DataFlow.Render : DataFlow.Capture)) throw new InvalidOperationException("Выбранное аудиоустройство недоступно.");
+                    if (device.State != DeviceState.Active || device.DataFlow != (system ? DataFlow.Render : DataFlow.Capture)) throw new InvalidOperationException(L.T("Выбранное аудиоустройство недоступно."));
                     capture = system ? new WasapiLoopbackCapture(device) : new WasapiCapture(device);
                 }
                 var buffer = new BufferedWaveProvider(capture.WaveFormat) { BufferDuration = TimeSpan.FromMilliseconds(500), DiscardOnBufferOverflow = true, ReadFully = true };
                 ISampleProvider source = buffer.ToSampleProvider();
                 if (source.WaveFormat.Channels == 1) source = new MonoToStereoSampleProvider(source);
-                if (source.WaveFormat.Channels != 2) throw new NotSupportedException("Для аудиоустройства нужен моно- или стереоформат.");
+                if (source.WaveFormat.Channels != 2) throw new NotSupportedException(L.T("Для аудиоустройства нужен моно- или стереоформат."));
                 if (source.WaveFormat.SampleRate != 48000) source = new WdlResamplingSampleProvider(source, 48000);
                 samples = source;
                 capture.DataAvailable += delegate(object sender, WaveInEventArgs e) { if (!disposed) { buffer.AddSamples(e.Buffer, 0, e.BytesRecorded); Interlocked.Add(ref capturedBytes, e.BytesRecorded); } };
-                capture.RecordingStopped += delegate(object sender, StoppedEventArgs e) { if (!disposed) failure = e.Exception == null ? "Аудиоустройство остановлено." : e.Exception.Message; };
+                capture.RecordingStopped += delegate(object sender, StoppedEventArgs e) { if (!disposed) failure = e.Exception == null ? L.T("Аудиоустройство остановлено.") : e.Exception.Message; };
             }
             catch { if (capture != null) capture.Dispose(); throw; }
         }

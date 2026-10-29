@@ -1,0 +1,273 @@
+\u0020· нажмите на логотип	\u0020· click the logo
+\u0020· не NVIDIA	\u0020· not NVIDIA
+\u0020· основной	\u0020· primary
+\u0020кадров/с ·\u0020	\u0020fps ·\u0020
+\u0020МБ	\u0020MB
+\u0020МБ.	\u0020MB.
+\u0020МБ; запись остановлена.	\u0020MB; recording stopped.
+\u0020Мбит/с	\u0020Mbps
+. Горячая клавиша:\u0020	. Shortcut:\u0020
+. Запись продолжается.\nНедоступные устройства подключатся автоматически.	. Recording continues.\nUnavailable devices reconnect automatically.
+. Нажмите, чтобы открыть обновление.	. Click to open the update.
+. Недоступные устройства подключатся автоматически.	. Unavailable devices reconnect automatically.
+.\nПосле скачивания буфер остановится, приложение перезапустится. Настройки и записи сохранятся.	.\nDownloading will stop the buffer and restart the app. Settings and clips will be kept.
+\nВыбрано:\u0020	\nSelected:\u0020
+\nЗапись продолжается. Новые кадры остаются для следующего повтора.	\nRecording continues. New frames are kept for the next replay.
+\nНастройки и записи сохранены.	\nSettings and clips have been kept.
+0 МБ	0 MB
+10 минут	10 minutes
+2 минуты	2 minutes
+30 FPS экономнее, 60 FPS плавнее. Частота не превышает возможности источника.	30 FPS uses fewer resources; 60 FPS is smoother. The source may limit the frame rate.
+30 кадров/с · экономнее	30 fps · efficient
+30 секунд	30 seconds
+5 минут	5 minutes
+60 кадров/с · плавнее	60 fps · smooth
+CBR · постоянный	CBR · constant
+CBR стремится к заданному битрейту; VBR экономит место на простых сценах, верхняя граница — выбранный битрейт.	CBR targets a constant bitrate; VBR saves space in simple scenes. The chosen bitrate is the upper limit.
+Portable удаляется вместе с папкой. Сначала сохрани нужные записи из Replays/.	Delete the Portable app together with its folder. Keep any clips you need from Replays/ first.
+ReplayLite — буфер выключен	ReplayLite — buffer off
+ReplayLite не завершился. Повтори обновление после выхода.	ReplayLite did not exit. Quit the app and try the update again.
+ReplayLite удалён. Оставшуюся папку с Uninstall.exe можно удалить вручную.	ReplayLite has been removed. You can delete the remaining folder with Uninstall.exe manually.
+ReplayLite уже запущен. Открой его из трея.	ReplayLite is already running. Open it from the system tray.
+VBR · переменный	VBR · variable
+Windows завершает сеанс.	Windows is ending the session.
+Автозапуск в трее с включённым буфером. Применяется сразу.	Start in the system tray with the replay buffer enabled. Applied immediately.
+Аудиоустройство остановлено.	The audio device has stopped.
+Без звука	No audio
+Битрейт · Мбит/с	Bitrate · Mbps
+Буфер остановлен.	The buffer is stopped.
+Буфер пока пуст.	The buffer is still empty.
+Буфер с пробелами	Buffer with spaces
+В «Настройках» выберите монитор NVIDIA.\nСейчас выбранный экран недоступен для записи.	Select an NVIDIA monitor in Settings.\nThe current screen is unavailable for recording.
+В БУФЕРЕ	BUFFER
+В релизе отсутствует пакет обновления.	The release has no update package.
+Вернуться на главную	Back to recording
+Версия\u0020	Version\u0020
+Версия пакета не соответствует релизу.	The package version does not match the release.
+Видео	Video
+Включает выбранный сигнал после успешного экспорта.	Play the selected sound after a successful save.
+Включает курсор в видеозаписи.	Include the mouse cursor in the video.
+Включите запись до нужного момента.\nЗатем сохраните уже записанный фрагмент.	Start recording before the moment you need.\nThen save the recent footage.
+Включить буфер	Enable buffer
+Выбери монитор, подключённый к видеокарте NVIDIA.	Select a monitor connected to an NVIDIA GPU.
+Выбери обычную клавишу или сочетание. F12 зарезервирована Windows; Ctrl/Alt/Shift/Win отдельно не назначаются.	Choose a key or a shortcut. F12 is reserved by Windows; Ctrl/Alt/Shift/Win alone cannot be assigned.
+Выберите готовый шаблон или отредактируйте имя ниже.	Choose a preset or edit the filename below.
+Выберите экран для записи	Select a screen to record
+Выбранное аудиоустройство недоступно.	The selected audio device is unavailable.
+Выбранное устройство недоступно	Selected device unavailable
+Выбрать	Browse
+Выключено: крестик завершает запись и приложение. Выход из меню трея всегда закрывает приложение.	Off: the close button stops recording and exits. Quit in the tray menu always exits the app.
+Выход	Quit
+Готовая палитра применяется сразу ко всему окну и сохраняется.	Apply a preset color palette to the whole app immediately and keep it for the next launch.
+Готово к записи	Ready to record
+Громкость в записи; 0% — тишина.	Volume in the recording; 0% is silent.
+Громкость в записи; системная громкость Windows не меняется.	Volume in the recording. Windows volume is unchanged.
+Громкость компьютера · %	System volume · %
+Громкость микрофона · %	Microphone volume · %
+Громкость сигнала · %	Save sound volume · %
+Дата и время	Date and time
+Две ноты	Two notes
+Длительность буфера	Buffer duration
+Для аудиоустройства нужен моно- или стереоформат.	The audio device must support mono or stereo.
+Для изменения записи остановите буфер	Stop the buffer to change recording settings
+Для изменения остановите запись	Stop recording to change settings
+До 1280 × 720 · CPU	Up to 1280 × 720 · CPU
+До 1920 × 1080 · CPU	Up to 1920 × 1080 · CPU
+Дождись завершения текущей операции и повтори обновление.	Wait for the current action to finish, then try updating again.
+Дождитесь завершения текущего действия.	Wait for the current action to finish.
+Доступна версия\u0020	Version available:\u0020
+Доступно обновление	Update available
+Доступно обновление ReplayLite	ReplayLite update available
+Если доступна новая версия, появится уведомление и отметка на логотипе. Если обновления нет — ничего не показывается.	Show a notification and mark the tray icon when a newer version is available. Stay quiet otherwise.
+Завершаю запись…	Finishing recording…
+Закрой ReplayLite через меню трея.	Quit ReplayLite from the tray menu.
+Закрывать в трей	Close to system tray
+Записывается выбранный экран. Для NVENC нужен монитор на NVIDIA.	Record the selected screen. An NVIDIA-connected monitor is required for NVENC.
+Записывать выбранный микрофон. Можно включить без звука компьютера.	Record the selected microphone. It can be enabled without system audio.
+Записывать звук выбранного устройства вывода.	Record audio from the selected output device.
+Записывать курсор	Include mouse cursor
+Запись восстановлена	Recording restored
+Запись началась. Через несколько секунд\nпоявится возможность сохранить первый повтор.	Recording has started. The first replay\nwill be ready in a few seconds.
+Запись останавливается при достижении резерва. Минимальный аварийный запас всегда 128 МБ.	Stop recording when free space reaches the reserve. A 128 MB safety minimum always applies.
+Запись остановлена	Recording stopped
+Запись остановлена.\n	Recording stopped.\n
+Запускаем запись…	Starting recording…
+Запускать с Windows	Start with Windows
+Запускать свёрнутым	Start minimized
+Захват не выдаёт новые видеосегменты более 15 секунд.	No new video segments received for over 15 seconds.
+Захват остановлен	Capture stopped
+Звук	Audio
+Звук компьютера	System audio
+Звук после сохранения	Play sound after saving
+Звук сохранения	Save sound
+Звук:\u0020	Audio:\u0020
+Здесь появляются только успешно сохранённые клипы.	Only successfully saved clips appear here.
+Идёт запись	Recording
+Идёт фоновая запись	Background recording is on
+Имя клипа	Clip filename
+Имя: используйте {date}, {time}, {monitor}; без расширения и символов \\ / : * ? \" < > |.	Filename: use {date}, {time}, {monitor}; no extension or characters \\ / : * ? \" < > |.
+Используется резервный захват Windows Graphics Capture.\nКадры кодируются на видеокарте.	Using fallback Windows Graphics Capture.\nVideo is encoded on the GPU.
+Исходное · GPU	Native · GPU
+Клавиши и отклик	Shortcut and feedback
+Кодек	Codec
+Компьютер и микрофон	System and microphone
+Контейнер меняется без перекодирования. MP4 удобен для публикации, MKV — для монтажа.	Change the container without re-encoding. MP4 is convenient for sharing; MKV for editing.
+Контролировать резерв	Check disk reserve
+Контрольная сумма не совпала. Файлы программы не изменены.	Checksum mismatch. Application files have not been changed.
+Короткий сигнал	Short tone
+Короткий сигнал воспроизводится только после успешного сохранения.	Play a short sound only after a successful save.
+Лаванда · тёмная	Lavender · dark
+Масштабирование через CPU\nПовышает нагрузку и расход RAM	CPU scaling enabled\nUses more CPU and RAM
+Микрофон	Microphone
+Монитор	Monitor
+Монитор\u0020	Monitor\u0020
+Монитор, дата и время	Monitor, date and time
+Мониторы не обнаружены	No monitors found
+Мягкий сигнал	Soft tone
+Мята · тёмная	Mint · dark
+НА ДИСКЕ	ON DISK
+На диске осталось менее\u0020	Less than\u0020
+Нажми сочетание…	Press a shortcut…
+Нажмите поле, затем сочетание. Клавиши работают глобально; занятые сочетания не сохраняются.	Click the field, then press a shortcut. It works globally; occupied shortcuts are rejected.
+Нажмите сочетание и отпустите клавиши.\nДля отмены щёлкните вне поля.	Press a shortcut and release the keys.\nClick outside the field to cancel.
+Назад	Back
+Накапливаем первые кадры…	Filling the first buffer segments…
+Настройки	Settings
+Начать запись	Start recording
+Не записывает	Not recording
+Не удалось включить буфер ReplayLite	Could not enable the ReplayLite buffer
+Не удалось включить ввод; прежняя клавиша сохранена.	Could not capture keys; the previous shortcut is kept.
+Не удалось восстановить запись	Could not restore recording
+Не удалось изменить автозапуск	Could not change Windows startup
+Не удалось начать запись	Could not start recording
+Не удалось определить путь работающего ReplayLite. Закрой приложение и повтори обновление.	Could not identify the running ReplayLite path. Quit the app and try updating again.
+Не удалось полностью восстановить файлы. Резервная копия:\u0020	Could not fully restore files. Backup:\u0020
+Не удалось проверить формат видеобуфера.	Could not inspect the video buffer format.
+Не удалось проверить:\u0020	Could not check for updates:\u0020
+Не удалось прочитать автозапуск	Could not read Windows startup
+Не удалось прочитать видеобуфер.\u0020	Could not read the video buffer.\u0020
+Не удалось сохранить настройки	Could not save settings
+Не удалось сохранить повтор.\n	Could not save replay.\n
+Не удалось сохранить:\u0020	Could not save:\u0020
+Неверная папка обновления.	Invalid update folder.
+Неверные параметры обновления.	Invalid update arguments.
+Неверный релиз.	Invalid release.
+Неверный формат пакета.	Invalid package format.
+Недопустимое имя или неизвестный токен — изменения не применены	Invalid filename or unknown token — the previous template is kept
+Недопустимые параметры видео.	Invalid video settings.
+Недопустимый путь в пакете.	Invalid path in the package.
+Недостаточно места для буфера: нужно примерно\u0020	Not enough free space for the buffer: approximately\u0020
+Некорректный размер или дубликат в пакете.	Invalid size or duplicate entry in the package.
+Обновить до\u0020	Update to\u0020
+Обновить мониторы	Refresh monitors
+Обновление ReplayLite	ReplayLite update
+Обновление не выполнено:\u0020	Update failed:\u0020
+Обновление не завершено:\u0020	Update did not finish:\u0020
+Обновляется другой процесс.	Another process is being updated.
+Ожидаем доступ к экрану…	Waiting for screen access…
+Океан · тёмная	Ocean · dark
+Останавливаем запись…	Stopping recording…
+Остановить запись	Stop recording
+Остановка буфера при недостатке свободного места.	Stop the buffer when free space is below the reserve.
+Отдельная громкость сигнала. Громкость Windows не меняется.	Separate save sound volume. Windows volume is unchanged.
+Откройте ReplayLite из трея и проверьте экран, звук и папку записи.	Open ReplayLite from the tray and check the monitor, audio and output folder.
+Открыть ReplayLite	Open ReplayLite
+Открыть настройки	Open settings
+Ошибка	Error
+Ошибка аудиоустройства:\u0020	Audio device error:\u0020
+Ошибка буфера:\u0020	Buffer error:\u0020
+Ошибка состояния	Status error
+Ошибка сохранения	Save failed
+Пакет неполный.	The package is incomplete.
+Пакет слишком большой.	The package is too large.
+Пакет содержит пользовательские данные.	The package contains user data.
+ПАМЯТЬ	MEMORY
+Папка временного буфера	Temporary buffer folder
+Папка для сохранённых клипов	Folder for saved clips
+Папка клипов	Clip folder
+Папка повторов	Replay folder
+Папки пакета и программы совпадают.	The package and application folders are the same.
+Перезапускаем захват; при необходимости используем резервный способ.\nЗапись можно остановить обычной кнопкой.	Restarting capture; switching to the fallback method if needed.\nYou can stop recording with the usual button.
+По умолчанию	Default location
+По умолчанию следует за системным устройством. Отсутствующее устройство заменяется тишиной до возвращения.	Follow the Windows default device. A missing device produces silence until it returns.
+Повтор сохранён	Replay saved
+Повторим запуск автоматически.\nПока экран недоступен, новые кадры не записываются.	Startup will be retried automatically.\nNo new frames are recorded while the screen is unavailable.
+Повторить проверку	Retry check
+Подождите…	Please wait…
+Показывает системное уведомление после сохранения.	Show a system notification after saving.
+Последний повтор	Latest replay
+Предыдущий повтор ещё сохраняется.	The previous replay is still being saved.
+Приложение и Windows	App and Windows
+Проверить обновления	Check for updates
+Проверить обновления · нажмите на логотип	Check for updates · click the logo
+Проверить снова	Check again
+Проверка и распаковка…	Checking and extracting…
+Проверка…	Checking…
+Проверьте экран, звук и папку сохранения.\nЗатем повторите запуск.	Check the monitor, audio and output folder.\nThen try starting again.
+Проверять обновления при запуске	Check for updates on startup
+Проверяю GitHub Releases…	Checking GitHub Releases…
+Прокрутка настроек	Settings scrollbar
+Пропорции сохраняются, увеличение отключено. Масштабирование копирует кадры в RAM и нагружает CPU; исходное разрешение этого не делает.	Keep the aspect ratio and never upscale. Scaling copies frames to RAM and uses CPU; native resolution does not.
+Прослушать	Preview sound
+Процесс захвата завершился.	Capture process exited.
+Путь выходит за пределы папки.	The path escapes the target folder.
+Путь программы слишком длинный для автозапуска Windows.	The app path is too long for Windows startup.
+Разрешение	Resolution
+Резерв диска · МБ	Disk reserve · MB
+Сброс	Reset
+Сбросить запись, звук, отклик, поведение окна и тему. Монитор, папка клипов, горячая клавиша и регистрация автозапуска сохраняются.	Reset recording, audio, feedback, window behavior and theme. Keep the monitor, clip folder, shortcut and Windows startup registration.
+Светлая	Light
+Своё имя	Custom filename
+Сжатые сегменты хранятся на диске. Не выбирайте медленный или сетевой диск.	Compressed segments are stored on disk. Avoid slow or network drives.
+Скачивание:\u0020	Downloading:\u0020
+Следующий обычный запуск откроет приложение в трее без автоматического включения буфера.	Next normal launch starts in the tray without automatically enabling the buffer.
+Сначала включи буфер.	Enable the buffer first.
+Сохранение заняло больше минуты.	Saving took more than one minute.
+Сохранение клипов	Clip output
+Сохранено:	Saved:
+Сохранено:\u0020	Saved:\u0020
+Сохраните нужный момент кнопкой или горячей клавишей.\nЗапись продолжается, даже если закрыть окно.	Save the moment with the button or shortcut.\nRecording continues when the window is closed.
+Сохранить повтор	Save replay
+Сохранить повтор\u0020\u0020\u0020	Save replay\u0020\u0020\u0020
+Сохранить последние\u0020	Save the last\u0020
+Сохранить уже записанный фрагмент. Длительность:\u0020	Save the recent footage. Duration:\u0020
+Сохраняю повтор…	Saving replay…
+Сочетание занято другой программой.\nВыберите другое или сохраните повтор кнопкой.	This shortcut is used by another app.\nChoose another shortcut or save with the button.
+Список обновляется при открытии вкладки. Недоступное выбранное устройство не заменяется другим микрофоном.	Devices refresh when the tab opens. A missing selected microphone is not replaced with another device.
+Список файлов установки отсутствует.	The installation file list is missing.
+Ссылки в папке установки не поддерживаются.	Links in the installation folder are not supported.
+Тема приложения	App theme
+Токены: {date}, {time}, {monitor}, {YYYY-MM-DD_HH-MM-SS}. Расширение добавляется автоматически; совпавшие имена получают номер.	Tokens: {date}, {time}, {monitor}, {YYYY-MM-DD_HH-MM-SS}. The extension is automatic; duplicate names receive a number.
+Только аппаратный NVENC. HEVC/AV1 требуют совместимую NVIDIA; при отсутствии поддержки запись сообщает ошибку без перехода на CPU.	Hardware NVENC only. HEVC/AV1 require a compatible NVIDIA GPU; an unsupported codec causes an error with no CPU fallback.
+Только звук компьютера	System audio only
+Только микрофон	Microphone only
+Уведомление о сохранении	Show save notifications
+Удалить ReplayLite? Настройки и записи останутся.	Uninstall ReplayLite? Settings and recordings will be kept.
+Укажи абсолютный путь папки повторов.	Choose an absolute replay folder path.
+Управление битрейтом	Rate control
+Установка в ссылку не поддерживается.	Installing into a link is not supported.
+Установлена актуальная версия\u0020	You have the latest version\u0020
+Устройство вывода	Output device
+Устройство микрофона	Microphone device
+Устройство по умолчанию	Windows default device
+Формат файла	File format
+Формат экрана изменился — буфер начат заново.\nНовые кадры уже записываются.	Screen format changed — the buffer was restarted.\nNew frames are already being recorded.
+Хранятся последние секунды записи. Сохранить можно и неполный буфер.	Keep the most recent seconds. You can save before the buffer is full.
+Целевой битрейт. Большие значения увеличивают качество и размер буфера.	Target bitrate. Higher values increase quality and buffer size.
+Частота кадров	Frame rate
+Шаблон	Preset
+Шаблон имени клипа	Filename template
+Экран и буфер	Screen and buffer
+Эта комбинация занята. Выбери другую. Прежняя настройка сохранена.	This shortcut is occupied. Choose another one. The previous setting is kept.
+. Выберите другой кодек в настройках видео.\n	. Choose another codec in Video settings.\n
+Windows не вернула дескриптор выбранного монитора.	Windows did not return a handle for the selected monitor.
+Буфер включён	Buffer enabled
+Видеокарта или драйвер не поддерживает выбранный кодек\u0020	The GPU or driver does not support the selected codec\u0020
+Выбранный монитор временно недоступен.	The selected monitor is temporarily unavailable.
+За 16 секунд не появился видеобуфер.	No video buffer appeared within 16 seconds.
+Захват не запущен. Проверь экран и драйвер NVIDIA.	Capture did not start. Check the screen and NVIDIA driver.
+Не найден bin\\ffmpeg.exe. Распакуй всю папку приложения.	Missing bin\\ffmpeg.exe. Extract the whole application folder.
+Укажите абсолютный путь папки буфера.	Choose an absolute temporary buffer folder path.
+Язык приложения	App language
+Язык интерфейса и уведомлений. Применяется сразу, запись не перезапускается.	Interface and notification language. Applied immediately without restarting recording.
+Русский	Русский

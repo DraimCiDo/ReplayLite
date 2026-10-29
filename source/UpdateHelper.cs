@@ -18,10 +18,10 @@ namespace ReplayLite
                 if (actualPath == null)
                 {
                     if (process.HasExited) return;
-                    throw new IOException("Не удалось определить путь работающего ReplayLite. Закрой приложение и повтори обновление.");
+                    throw new IOException(L.T("Не удалось определить путь работающего ReplayLite. Закрой приложение и повтори обновление."));
                 }
-                if (!string.Equals(actualPath, expectedPath, StringComparison.OrdinalIgnoreCase)) throw new IOException("Обновляется другой процесс.");
-                if (!process.WaitForExit(60000)) throw new IOException("ReplayLite не завершился. Повтори обновление после выхода.");
+                if (!string.Equals(actualPath, expectedPath, StringComparison.OrdinalIgnoreCase)) throw new IOException(L.T("Обновляется другой процесс."));
+                if (!process.WaitForExit(60000)) throw new IOException(L.T("ReplayLite не завершился. Повтори обновление после выхода."));
             }
             catch (InvalidOperationException) { if (!process.HasExited) throw; }
             catch (Win32Exception) { if (!process.HasExited) throw; }
@@ -32,9 +32,9 @@ namespace ReplayLite
             string root = null, stage = null;
             try
             {
-                if (args.Length != 3) throw new IOException("Неверные параметры обновления.");
-                int pid = int.Parse(args[0]); root = Path.GetFullPath(args[1]); stage = Path.GetFullPath(args[2]);
-                if (!File.Exists(Path.Combine(root, "ReplayLite.exe")) || !stage.StartsWith(Path.GetFullPath(Path.GetTempPath()).TrimEnd('\\') + "\\ReplayLite-update-", StringComparison.OrdinalIgnoreCase)) throw new IOException("Неверная папка обновления.");
+                if (args.Length != 3) throw new IOException(L.T("Неверные параметры обновления."));
+                int pid = int.Parse(args[0]); root = Path.GetFullPath(args[1]); L.InitializeFromSettings(root); stage = Path.GetFullPath(args[2]);
+                if (!File.Exists(Path.Combine(root, "ReplayLite.exe")) || !stage.StartsWith(Path.GetFullPath(Path.GetTempPath()).TrimEnd('\\') + "\\ReplayLite-update-", StringComparison.OrdinalIgnoreCase)) throw new IOException(L.T("Неверная папка обновления."));
                 Process target;
                 try { target = Process.GetProcessById(pid); } catch (ArgumentException) { target = null; }
                 if (target != null)
@@ -44,7 +44,7 @@ namespace ReplayLite
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\ReplayLite", true)) if (key != null && string.Equals((string)key.GetValue("InstallLocation"), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) key.SetValue("DisplayVersion", File.ReadAllText(Path.Combine(root, "VERSION")).Trim());
                 Deployment.Cleanup(stage); Process.Start(Path.Combine(root, "ReplayLite.exe")); return 0;
             }
-            catch (Exception e) { MessageBox.Show("Обновление не завершено: " + e.Message + "\nНастройки и записи сохранены.", "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Error); if (root != null && File.Exists(Path.Combine(root, "ReplayLite.exe"))) Process.Start(Path.Combine(root, "ReplayLite.exe")); return 1; }
+            catch (Exception e) { MessageBox.Show(L.T("Обновление не завершено: ") + e.Message + L.T("\nНастройки и записи сохранены."), "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Error); if (root != null && File.Exists(Path.Combine(root, "ReplayLite.exe"))) Process.Start(Path.Combine(root, "ReplayLite.exe")); return 1; }
         }
     }
 }

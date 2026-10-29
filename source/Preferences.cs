@@ -10,7 +10,7 @@ namespace ReplayLite
 {
     public sealed partial class Settings
     {
-        public string Container = "mp4", FilenameTemplate = "Replay-{date}_{time}", Codec = "h264", RateControl = "cbr", Resolution = "native", Palette = "mint";
+        public string Container = "mp4", FilenameTemplate = "Replay-{date}_{time}", Codec = "h264", RateControl = "cbr", Resolution = "native", Palette = "mint", Language = "ru";
         public bool CheckUpdatesOnStartup = true, CloseToTray = true, StartMinimized;
         public int FeedbackVolume = 60, FeedbackTone;
         internal void LoadPreference(string key, string value)
@@ -18,6 +18,7 @@ namespace ReplayLite
             bool flag; int number;
             switch (key)
             {
+                case "Language": if (value == "ru" || value == "en") Language = value; break;
                 case "Container": if (new[] { "mp4", "mkv" }.Contains(value)) Container = value; break;
                 case "FilenameTemplate": if (ValidTemplate(value)) FilenameTemplate = value; break;
                 case "Codec": if (new[] { "h264", "hevc", "av1" }.Contains(value)) Codec = value; break;
@@ -33,13 +34,13 @@ namespace ReplayLite
         }
         internal string[] PreferenceLines()
         {
-            return new[] { "Container=" + Container, "FilenameTemplate=" + FilenameTemplate, "Codec=" + Codec, "RateControl=" + RateControl, "Resolution=" + Resolution, "Palette=" + Palette,
+            return new[] { "Container=" + Container, "FilenameTemplate=" + FilenameTemplate, "Codec=" + Codec, "RateControl=" + RateControl, "Resolution=" + Resolution, "Palette=" + Palette, "Language=" + Language,
                 "CheckUpdatesOnStartup=" + CheckUpdatesOnStartup, "CloseToTray=" + CloseToTray, "StartMinimized=" + StartMinimized, "FeedbackVolume=" + FeedbackVolume, "FeedbackTone=" + FeedbackTone };
         }
         internal void ValidatePreferences()
         {
-            if (!ValidTemplate(FilenameTemplate)) throw new ArgumentException("Имя: используйте {date}, {time}, {monitor}; без расширения и символов \\ / : * ? \" < > |.");
-            if (!new[] { "mp4", "mkv" }.Contains(Container) || !new[] { "h264", "hevc", "av1" }.Contains(Codec) || !new[] { "cbr", "vbr" }.Contains(RateControl) || !new[] { "native", "1080", "720" }.Contains(Resolution)) throw new ArgumentException("Недопустимые параметры видео.");
+            if (!ValidTemplate(FilenameTemplate)) throw new ArgumentException(L.T("Имя: используйте {date}, {time}, {monitor}; без расширения и символов \\ / : * ? \" < > |."));
+            if (!new[] { "mp4", "mkv" }.Contains(Container) || !new[] { "h264", "hevc", "av1" }.Contains(Codec) || !new[] { "cbr", "vbr" }.Contains(RateControl) || !new[] { "native", "1080", "720" }.Contains(Resolution)) throw new ArgumentException(L.T("Недопустимые параметры видео."));
         }
         internal static bool ValidTemplate(string text)
         {

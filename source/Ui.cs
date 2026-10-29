@@ -12,6 +12,7 @@ namespace ReplayLite
     interface IAnimationPreference { bool AnimationsEnabled { get; } }
     static class Theme
     {
+        public static Func<string, string> TranslateText = text => text;
         public static Color Background = Color.FromArgb(13, 17, 24), Card = Color.FromArgb(22, 28, 39), Input = Color.FromArgb(30, 38, 51);
         public static Color Border = Color.FromArgb(43, 53, 69), Text = Color.FromArgb(239, 244, 251), Muted = Color.FromArgb(143, 159, 181);
         public static Color Accent = Color.FromArgb(76, 224, 178), Blue = Color.FromArgb(113, 168, 255), Red = Color.FromArgb(255, 131, 139);
@@ -40,6 +41,43 @@ namespace ReplayLite
         public static void Canvas(Control c)
         { c.Font = new Font("Segoe UI", 10); c.ForeColor = Text; c.BackColor = Card; }
     }
+    sealed class ThemeLabel : Label
+    {
+        public bool HelpIcon { get; set; }
+        public ThemeLabel() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var flags = TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+            flags |= Text.IndexOf('\n') >= 0 || Height > Font.Height * 1.8 ? TextFormatFlags.WordBreak : TextFormatFlags.SingleLine;
+            if (AutoEllipsis) flags |= TextFormatFlags.EndEllipsis;
+            if (TextAlign == ContentAlignment.MiddleCenter || TextAlign == ContentAlignment.TopCenter || TextAlign == ContentAlignment.BottomCenter) flags |= TextFormatFlags.HorizontalCenter;
+            if (TextAlign == ContentAlignment.TopRight || TextAlign == ContentAlignment.MiddleRight || TextAlign == ContentAlignment.BottomRight) flags |= TextFormatFlags.Right;
+            if (TextAlign == ContentAlignment.MiddleLeft || TextAlign == ContentAlignment.MiddleCenter || TextAlign == ContentAlignment.MiddleRight) flags |= TextFormatFlags.VerticalCenter;
+            Color color = Enabled ? ForeColor : Theme.Muted;
+            var bounds = ClientRectangle; if (HelpIcon) bounds.Width = Math.Max(1, bounds.Width - 20);
+            TextRenderer.DrawText(e.Graphics, Text, Font, bounds, color, flags);
+            if (HelpIcon) { int width = TextRenderer.MeasureText(e.Graphics, Text, Font, new Size(bounds.Width, Height), flags).Width; LucideAssets.Draw(e.Graphics, "circle-question-mark", new Rectangle(Math.Min(bounds.Width + 4, width + 5), (Height - 14) / 2, 14, 14), Theme.Muted); }
+        }
+    }
+    sealed class ThemeToolTip : ToolTip
+    {
+        readonly Font heading = new Font("Segoe UI", 9, FontStyle.Bold), body = new Font("Segoe UI", 9);
+        public ThemeToolTip()
+        {
+            OwnerDraw = true; ShowAlways = true; InitialDelay = 450; ReshowDelay = 100; AutoPopDelay = 15000; UseAnimation = UseFading = false;
+            Popup += delegate(object sender, PopupEventArgs e) { var text = GetToolTip(e.AssociatedControl); var size = TextRenderer.MeasureText(text, body, new Size(320, 1000), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding); e.ToolTipSize = new Size(Math.Min(344, Math.Max(160, size.Width + 24)), size.Height + 48); };
+            Draw += delegate(object sender, DrawToolTipEventArgs e)
+            {
+                e.Graphics.Clear(Theme.Card); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var pen = new Pen(Theme.Border)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                string title = e.AssociatedControl == null ? "ReplayLite" : e.AssociatedControl.AccessibleName;
+                if (string.IsNullOrEmpty(title)) title = e.AssociatedControl == null ? "ReplayLite" : e.AssociatedControl.Text;
+                TextRenderer.DrawText(e.Graphics, title, heading, new Rectangle(12, 10, e.Bounds.Width - 24, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(e.Graphics, e.ToolTipText, body, new Rectangle(12, 34, e.Bounds.Width - 24, e.Bounds.Height - 42), Theme.Muted, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            };
+        }
+        protected override void Dispose(bool disposing) { if (disposing) { heading.Dispose(); body.Dispose(); } base.Dispose(disposing); }
+    }
     sealed class CardPanel : Panel
     {
         public CardPanel() { DoubleBuffered = true; BackColor = Theme.Background; }
@@ -55,34 +93,26 @@ namespace ReplayLite
     enum NavigationGlyph { None, Gear, Back, Monitor, Folder, Video, Audio, Keyboard, Windows }
     sealed class ActionButton : Button
     {
-        readonly Timer tween = new Timer { Interval = 16 };
-        readonly Stopwatch clock = new Stopwatch();
-        Color current = Theme.Input, from, target;
+        Color current = Theme.Input;
+        Font detailFont;
         Color fill = Theme.Input;
         bool hovered, pressed;
         public string Detail = "";
         public NavigationGlyph Glyph = NavigationGlyph.None;
         public bool AttentionDot = false;
-        public Color Fill { get { return fill; } set { fill = value; Transition(); } }
-        public bool Animating { get { return tween.Enabled; } }
+        public Color Fill { get { return fill; } set { if (fill == value) return; fill = value; Transition(); } }
+        public bool Animating { get { return false; } }
         public ActionButton()
         {
             Theme.Canvas(this); FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Cursor = Cursors.Hand;
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            tween.Tick += delegate
-            {
-                if (!Theme.CanAnimate(this)) { FinishAnimation(); return; }
-                float t = Math.Min(1, clock.ElapsedMilliseconds / 150f); t = 1 - (1 - t) * (1 - t);
-                current = Theme.Mix(from, target, t); Invalidate(); if (clock.ElapsedMilliseconds >= 150) FinishAnimation();
-            };
         }
         void Transition()
         {
-            target = !Enabled ? Theme.Mix(Theme.Input, Theme.Card, .4f) : pressed ? Theme.Mix(fill, Color.Black, 0.12f) : hovered ? Theme.Mix(fill, Color.White, 0.13f) : fill;
-            if (!Theme.CanAnimate(this) || current == target) { FinishAnimation(); return; }
-            from = current; clock.Restart(); tween.Start();
+            var next = !Enabled ? Theme.Mix(Theme.Input, Theme.Card, .4f) : pressed ? Theme.Mix(fill, Color.Black, 0.12f) : hovered ? Theme.Mix(fill, Theme.Text, 0.09f) : fill;
+            if (current == next) return; current = next; Invalidate();
         }
-        public void FinishAnimation() { tween.Stop(); current = target; Invalidate(); }
+        public void FinishAnimation() { Transition(); }
         internal void PreviewHover(bool value) { hovered = value; Transition(); }
         protected override void OnMouseEnter(EventArgs e) { hovered = true; Transition(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { hovered = pressed = false; Transition(); base.OnMouseLeave(e); }
@@ -104,46 +134,23 @@ namespace ReplayLite
             {
                 int y = Math.Max(4, (Height - 49) / 2);
                 TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(8, y, Width - 16, 25), color, flags);
-                using (var small = new Font("Segoe UI", 8.5f)) TextRenderer.DrawText(e.Graphics, Detail, small, new Rectangle(8, y + 26, Width - 16, 22), color, flags);
+                if (detailFont == null) detailFont = new Font("Segoe UI", 8.5f);
+                TextRenderer.DrawText(e.Graphics, Detail, detailFont, new Rectangle(8, y + 26, Width - 16, 22), color, flags);
             }
             if (AttentionDot) using (var dot = new SolidBrush(Theme.Accent)) e.Graphics.FillEllipse(dot, Width - 10, 2, 8, 8);
             if (Focused && ShowFocusCues) { using (var path = Theme.Round(new RectangleF(4, 4, Width - 8, Height - 8), 9)) using (var pen = new Pen(Theme.Blue)) e.Graphics.DrawPath(pen, path); }
         }
         void DrawNavigation(Graphics graphics, Color color)
         {
-            float x = Width / 2f, y = Height / 2f;
-            using (var pen = new Pen(color, 1.8f))
-            {
-                pen.StartCap = pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
-                if (Glyph == NavigationGlyph.Back)
-                {
-                    using (var path = new GraphicsPath()) { path.AddBezier(x - 7, y - 5, x + 11, y - 8, x + 12, y + 11, x - 2, y + 9); graphics.DrawPath(pen, path); }
-                    graphics.DrawLines(pen, new[] { new PointF(x - 2, y - 10), new PointF(x - 8, y - 5), new PointF(x - 2, y) });
-                }
-                else if (Glyph == NavigationGlyph.Monitor)
-                { graphics.DrawRectangle(pen, x - 10, y - 8, 20, 13); graphics.DrawLine(pen, x, y + 5, x, y + 9); graphics.DrawLine(pen, x - 5, y + 10, x + 5, y + 10); }
-                else if (Glyph == NavigationGlyph.Folder)
-                { graphics.DrawPolygon(pen, new[] { new PointF(x - 10, y - 7), new PointF(x - 3, y - 7), new PointF(x, y - 4), new PointF(x + 10, y - 4), new PointF(x + 10, y + 8), new PointF(x - 10, y + 8) }); }
-                else if (Glyph == NavigationGlyph.Video)
-                { graphics.DrawRectangle(pen, x - 10, y - 7, 13, 14); graphics.DrawPolygon(pen, new[] { new PointF(x + 3, y - 3), new PointF(x + 10, y - 7), new PointF(x + 10, y + 7), new PointF(x + 3, y + 3) }); }
-                else if (Glyph == NavigationGlyph.Audio)
-                { graphics.DrawArc(pen, x - 9, y - 9, 18, 20, 180, 180); graphics.DrawRectangle(pen, x - 10, y, 4, 8); graphics.DrawRectangle(pen, x + 6, y, 4, 8); }
-                else if (Glyph == NavigationGlyph.Keyboard)
-                { graphics.DrawRectangle(pen, x - 11, y - 7, 22, 14); for (int row = 0; row < 2; row++) for (int col = 0; col < 5; col++) graphics.DrawLine(pen, x - 7 + col * 3.5f, y - 3 + row * 4, x - 6 + col * 3.5f, y - 3 + row * 4); graphics.DrawLine(pen, x - 4, y + 5, x + 4, y + 5); }
-                else if (Glyph == NavigationGlyph.Windows)
-                { for (int row = 0; row < 2; row++) for (int col = 0; col < 2; col++) graphics.DrawRectangle(pen, x - 9 + col * 11, y - 9 + row * 11, 7, 7); }
-                else
-                {
-                    var points = new PointF[32];
-                    for (int i = 0; i < points.Length; i++) { double angle = i * Math.PI / 16; float radius = (i % 4 == 0 || i % 4 == 3) ? 10 : 8; points[i] = new PointF(x + radius * (float)Math.Cos(angle), y + radius * (float)Math.Sin(angle)); }
-                    graphics.DrawPolygon(pen, points); graphics.DrawEllipse(pen, x - 3.5f, y - 3.5f, 7, 7);
-                }
-            }
+            string[] names = { "", "settings", "undo-2", "monitor", "folder", "video", "headphones", "keyboard", "panels-top-left" };
+            int size = (int)Math.Round(20 * graphics.DpiX / 96f);
+            LucideAssets.Draw(graphics, names[(int)Glyph], new Rectangle((Width - size) / 2, (Height - size) / 2, size, size), color);
         }
-        protected override void Dispose(bool disposing) { if (disposing) tween.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing && detailFont != null) detailFont.Dispose(); base.Dispose(disposing); }
     }
     sealed class ToggleSwitch : CheckBox
     {
+        public bool HelpIcon { get; set; }
         public ToggleSwitch()
         { Theme.Canvas(this); AutoSize = false; Cursor = Cursors.Hand; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
         protected override void OnPaint(PaintEventArgs e)
@@ -153,7 +160,10 @@ namespace ReplayLite
             using (var path = Theme.Round(new RectangleF(Width - 44, y, 42, 22), 11))
             using (var brush = new SolidBrush(Enabled && Checked ? Theme.Accent : Theme.Input)) e.Graphics.FillPath(brush, path);
             using (var brush = new SolidBrush(Enabled ? (Checked ? Theme.Background : Theme.Muted) : Theme.Border)) e.Graphics.FillEllipse(brush, Width - (Checked ? 21 : 41), y + 3, 16, 16);
-            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(0, 0, Width - 53, Height), Enabled ? ForeColor : Theme.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            var flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+            int textWidth = Width - (HelpIcon ? 75 : 53);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(0, 0, textWidth, Height), Enabled ? ForeColor : Theme.Muted, flags);
+            if (HelpIcon) { int width = TextRenderer.MeasureText(e.Graphics, Text, Font, new Size(textWidth, Height), flags).Width; LucideAssets.Draw(e.Graphics, "circle-question-mark", new Rectangle(Math.Min(textWidth + 4, width + 5), (Height - 14) / 2, 14, 14), Theme.Muted); }
             if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(1, 1, Width - 3, Height - 3), Theme.Text, BackColor);
         }
     }
@@ -166,7 +176,7 @@ namespace ReplayLite
         public int SelectedIndex
         {
             get { return index; }
-            set { if (value < -1 || value >= Items.Count) throw new ArgumentOutOfRangeException("value"); bool changed = index != value; index = value; Text = index < 0 ? "" : Items[index].ToString(); Invalidate(); if (changed && SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty); }
+            set { if (value < -1 || value >= Items.Count) throw new ArgumentOutOfRangeException("value"); bool changed = index != value; index = value; Text = index < 0 ? "" : Theme.TranslateText(Items[index].ToString()); Invalidate(); if (changed && SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty); }
         }
         public SelectBox()
         { Theme.Canvas(this); BackColor = Theme.Card; Cursor = Cursors.Hand; TabStop = true; AccessibleRole = AccessibleRole.ComboBox; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
@@ -184,7 +194,7 @@ namespace ReplayLite
             if (popup.Visible) return;
             for (int i = popup.Items.Count - 1; i >= 0; i--) popup.Items[i].Dispose();
             popup.Items.Clear(); popup.MinimumSize = new Size(Width, 0);
-            for (int i = 0; i < Items.Count; i++) { int choice = i; var item = popup.Items.Add(Items[i].ToString()); item.Click += delegate { SelectedIndex = choice; }; }
+            for (int i = 0; i < Items.Count; i++) { int choice = i; var item = popup.Items.Add(Theme.TranslateText(Items[i].ToString())); item.Click += delegate { SelectedIndex = choice; }; }
             // Closed is raised while ToolStrip still uses its native window. Dispose only with the owner.
             popup.Show(this, new Point(0, Height));
         }
@@ -213,37 +223,31 @@ namespace ReplayLite
             using (var brush = new SolidBrush(Theme.Input)) using (var pen = new Pen(Focused ? Theme.Accent : Theme.Border))
             { e.Graphics.FillPath(brush, path); e.Graphics.DrawPath(pen, path); }
             TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(11, 0, Width - 40, Height), Enabled ? Theme.Text : Theme.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-            using (var pen = new Pen(Theme.Muted, 1.6f)) e.Graphics.DrawLines(pen, new[] { new Point(Width - 24, Height / 2 - 2), new Point(Width - 19, Height / 2 + 3), new Point(Width - 14, Height / 2 - 2) });
+            LucideAssets.Draw(e.Graphics, "chevron-down", new Rectangle(Width - 27, Height / 2 - 8, 16, 16), Theme.Muted);
         }
     }
     sealed class BufferBar : Control
     {
-        readonly Timer tween = new Timer { Interval = 16 }; readonly Stopwatch clock = new Stopwatch();
-        float current, from, target;
-        public bool Animating { get { return tween.Enabled; } }
-        public float Value { get { return target; } set { var next = Math.Max(0, Math.Min(1, value)); if (next == target) return; target = next; if (!Theme.CanAnimate(this)) { FinishAnimation(); return; } from = current; clock.Restart(); tween.Start(); } }
-        public BufferBar()
-        {
-            BackColor = Theme.Card; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            tween.Tick += delegate { if (!Theme.CanAnimate(this)) { FinishAnimation(); return; } float t = Math.Min(1, clock.ElapsedMilliseconds / 200f); current = from + (target - from) * (1 - (1 - t) * (1 - t)); Invalidate(); if (t >= 1) FinishAnimation(); };
-        }
-        public void FinishAnimation() { tween.Stop(); current = target; Invalidate(); }
+        float current;
+        public bool Animating { get { return false; } }
+        public float Value { get { return current; } set { float next = Math.Max(0, Math.Min(1, value)); if (next == current) return; current = next; Invalidate(); } }
+        public BufferBar() { BackColor = Theme.Card; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        public void FinishAnimation() { }
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(new RectangleF(0, 0, Width, Height), Height / 2f)) using (var brush = new SolidBrush(Theme.Input)) e.Graphics.FillPath(brush, path);
             if (current > 0) using (var path = Theme.Round(new RectangleF(0, 0, Math.Max(Height, Width * current), Height), Height / 2f)) using (var brush = new SolidBrush(Theme.Accent)) e.Graphics.FillPath(brush, path);
         }
-        protected override void Dispose(bool disposing) { if (disposing) tween.Dispose(); base.Dispose(disposing); }
+
     }
     sealed class StatusBadge : Control
     {
-        readonly Timer tween = new Timer { Interval = 16 }; readonly Stopwatch clock = new Stopwatch();
-        Color from, current = Theme.Muted, target = Theme.Muted;
-        public bool Animating { get { return tween.Enabled; } }
-        public StatusBadge() { BackColor = Theme.Background; Font = new Font("Segoe UI", 9, FontStyle.Bold); SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); tween.Tick += delegate { if (!Theme.CanAnimate(this)) { FinishAnimation(); return; } float t = Math.Min(1, clock.ElapsedMilliseconds / 180f); current = Theme.Mix(from, target, t); Invalidate(); if (t >= 1) FinishAnimation(); }; }
-        public void Set(string text, Color color) { Text = text; if (target == color) { Invalidate(); return; } target = color; if (!Theme.CanAnimate(this)) { FinishAnimation(); return; } from = current; clock.Restart(); tween.Start(); }
-        public void FinishAnimation() { tween.Stop(); current = target; Invalidate(); }
+        Color current = Theme.Muted;
+        public bool Animating { get { return false; } }
+        public StatusBadge() { BackColor = Theme.Background; Font = new Font("Segoe UI", 9, FontStyle.Bold); SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        public void Set(string text, Color color) { if (Text == text && current == color) return; Text = text; current = color; Invalidate(); }
+        public void FinishAnimation() { }
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -251,7 +255,7 @@ namespace ReplayLite
             using (var brush = new SolidBrush(current)) e.Graphics.FillEllipse(brush, 12, Height / 2 - 3, 6, 6);
             TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(23, 0, Width - 28, Height), current, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
-        protected override void Dispose(bool disposing) { if (disposing) tween.Dispose(); base.Dispose(disposing); }
+
     }
     sealed class RoundedMenu : ContextMenuStrip
     {
@@ -273,6 +277,12 @@ namespace ReplayLite
         protected override void OnOpened(EventArgs e) { ClipCorners(); base.OnOpened(e); }
         internal Image AddIcon(MenuGlyph glyph)
         { var image = MenuIcons.Draw(ImageScalingSize.Width, glyph); ownedImages.Add(image); return image; }
+        internal void RefreshIconColors()
+        {
+            var previous = ownedImages.ToArray(); ownedImages.Clear();
+            foreach (ToolStripItem item in Items) if (item.Image != null && item.Image.Tag is MenuGlyph) item.Image = AddIcon((MenuGlyph)item.Image.Tag);
+            foreach (var image in previous) image.Dispose();
+        }
         protected override void Dispose(bool disposing)
         {
             if (disposing) { foreach (var image in ownedImages) image.Dispose(); ownedImages.Clear(); }
@@ -309,45 +319,33 @@ namespace ReplayLite
     {
         public static Bitmap Draw(int size, MenuGlyph glyph)
         {
-            var image = new Bitmap(size, size);
-            using (var g = Graphics.FromImage(image))
-            using (var pen = new Pen(glyph == MenuGlyph.Record ? Theme.Accent : Theme.Text, 1.4f))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias; g.ScaleTransform(size / 16f, size / 16f);
-                pen.StartCap = pen.EndCap = LineCap.Round; pen.LineJoin = LineJoin.Round;
-                switch (glyph)
-                {
-                    case MenuGlyph.Open:
-                        g.DrawRectangle(pen, 2.5f, 3, 11, 10); g.DrawLine(pen, 3, 6, 13, 6); break;
-                    case MenuGlyph.Save:
-                        g.DrawLines(pen, new[] { new PointF(3, 2), new PointF(11, 2), new PointF(14, 5), new PointF(14, 14), new PointF(2, 14), new PointF(2, 2), new PointF(3, 2) });
-                        g.DrawRectangle(pen, 5, 2, 5, 4); g.DrawRectangle(pen, 5, 9, 6, 5); break;
-                    case MenuGlyph.Record:
-                        g.DrawEllipse(pen, 2.5f, 2.5f, 11, 11); using (var brush = new SolidBrush(Theme.Accent)) g.FillEllipse(brush, 6, 6, 4, 4); break;
-                    case MenuGlyph.Folder:
-                        g.DrawLines(pen, new[] { new PointF(2, 13), new PointF(2, 3), new PointF(6, 3), new PointF(8, 5), new PointF(14, 5), new PointF(14, 13), new PointF(2, 13) }); break;
-                    case MenuGlyph.Exit:
-                        g.DrawLines(pen, new[] { new PointF(6, 2), new PointF(2, 2), new PointF(2, 14), new PointF(6, 14) });
-                        g.DrawLine(pen, 6, 8, 14, 8); g.DrawLines(pen, new[] { new PointF(11, 5), new PointF(14, 8), new PointF(11, 11) }); break;
-                }
-            }
-            return image;
+            string[] names = { "external-link", "save", "circle-dot", "folder", "log-out" };
+            var image = (Bitmap)LucideAssets.Get(names[(int)glyph], size, Theme.Text).Clone(); image.Tag = glyph; return image;
         }
     }
-    enum TrayState { Idle, Recording, Saving, Error }
+    enum TrayState { Idle, Recording, Saving, Error, Update }
     static class AppIcons
     {
         [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr handle);
-        public static Bitmap Draw(int size, TrayState state)
+        public static Bitmap Brand(int size) { return DrawCore(size, TrayState.Recording, false); }
+        public static Bitmap Draw(int size, TrayState state) { return DrawCore(size, state, true); }
+        static Bitmap DrawCore(int size, TrayState state, bool badge)
         {
-            var image = new Bitmap(size, size); using (var g = Graphics.FromImage(image))
+            var image = new Bitmap(size, size);
+            using (var graphics = Graphics.FromImage(image))
             {
-                g.SmoothingMode = SmoothingMode.AntiAlias; g.ScaleTransform(size / 64f, size / 64f);
-                using (var path = Theme.Round(new RectangleF(2, 2, 60, 60), 16)) using (var brush = new SolidBrush(Color.FromArgb(23, 34, 46))) g.FillPath(brush, path);
-                Color ring = state == TrayState.Idle ? Color.FromArgb(153, 172, 193) : state == TrayState.Error ? Theme.Red : state == TrayState.Saving ? Theme.Blue : Theme.Accent;
-                using (var pen = new Pen(ring, 6) { StartCap = LineCap.Round, EndCap = LineCap.Flat }) g.DrawArc(pen, 14, 14, 36, 36, 35, 285);
-                using (var brush = new SolidBrush(ring)) { g.FillPolygon(brush, new[] { new PointF(43, 8), new PointF(56, 20), new PointF(40, 24) }); g.FillEllipse(brush, 25, 25, 14, 14); }
-                if (state != TrayState.Idle) { using (var brush = new SolidBrush(Theme.Background)) g.FillEllipse(brush, 43, 43, 20, 20); using (var brush = new SolidBrush(ring)) g.FillEllipse(brush, 47, 47, 12, 12); }
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                Color color = state == TrayState.Idle ? Theme.Muted : state == TrayState.Error ? Theme.Red : state == TrayState.Saving ? Theme.Blue : Theme.Accent;
+                using (var path = Theme.Round(new RectangleF(0, 0, size, size), size * .25f)) using (var brush = new SolidBrush(Theme.Mix(Theme.Card, Theme.Accent, .1f))) graphics.FillPath(brush, path);
+                int margin = Math.Max(1, size / 10); LucideAssets.Draw(graphics, "square-play", new Rectangle(margin, margin, size - 2 * margin, size - 2 * margin), color);
+                if (badge)
+                {
+                    int diameter = Math.Max(7, (int)Math.Round(size * .4)); int x = size - diameter, y = size - diameter;
+                    using (var brush = new SolidBrush(Theme.Background)) graphics.FillEllipse(brush, x - 1, y - 1, diameter + 2, diameter + 2);
+                    using (var brush = new SolidBrush(color)) graphics.FillEllipse(brush, x, y, diameter, diameter);
+                    string mark = state == TrayState.Idle ? "pause" : state == TrayState.Error ? "circle-alert" : state == TrayState.Saving ? "save" : state == TrayState.Update ? "arrow-up" : "circle-dot";
+                    LucideAssets.Draw(graphics, mark, new Rectangle(x + 1, y + 1, diameter - 2, diameter - 2), Theme.Background);
+                }
             }
             return image;
         }
@@ -360,7 +358,7 @@ namespace ReplayLite
         {
             Directory.CreateDirectory(folder);
             var sizes = new[] { 16, 20, 24, 32, 40, 48, 64, 128, 256 }; var data = new List<byte[]>();
-            foreach (var size in sizes) using (var image = Draw(size, TrayState.Recording)) using (var stream = new MemoryStream()) { image.Save(stream, System.Drawing.Imaging.ImageFormat.Png); data.Add(stream.ToArray()); }
+            foreach (var size in sizes) using (var image = Brand(size)) using (var stream = new MemoryStream()) { image.Save(stream, System.Drawing.Imaging.ImageFormat.Png); data.Add(stream.ToArray()); }
             using (var file = File.Create(Path.Combine(folder, "ReplayLite.ico"))) using (var writer = new BinaryWriter(file))
             {
                 writer.Write((ushort)0); writer.Write((ushort)1); writer.Write((ushort)sizes.Length); int offset = 6 + 16 * sizes.Length;

@@ -11,12 +11,12 @@ namespace ReplayLite
     {
         public static string Child(string root, string relative)
         {
-            if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) || relative.Contains(":")) throw new IOException("Недопустимый путь в пакете.");
+            if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) || relative.Contains(":")) throw new IOException(L.T("Недопустимый путь в пакете."));
             string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             string path = Path.GetFullPath(Path.Combine(prefix, relative));
-            if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new IOException("Путь выходит за пределы папки.");
+            if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new IOException(L.T("Путь выходит за пределы папки."));
             string parent = Path.GetDirectoryName(path);
-            while (parent.Length >= prefix.Length) { if (Directory.Exists(parent) && (File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0) throw new IOException("Ссылки в папке установки не поддерживаются."); parent = Path.GetDirectoryName(parent); }
+            while (parent.Length >= prefix.Length) { if (Directory.Exists(parent) && (File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0) throw new IOException(L.T("Ссылки в папке установки не поддерживаются.")); parent = Path.GetDirectoryName(parent); }
             return path;
         }
         static bool Reserved(string relative)
@@ -28,22 +28,22 @@ namespace ReplayLite
                 foreach (var entry in zip.Entries)
                 {
                     string name = entry.FullName.Replace('\\', '/');
-                    if (!name.StartsWith("ReplayLite/", StringComparison.Ordinal) || name.Length == 11) { if (name == "ReplayLite/") continue; throw new IOException("Неверный формат пакета."); }
+                    if (!name.StartsWith("ReplayLite/", StringComparison.Ordinal) || name.Length == 11) { if (name == "ReplayLite/") continue; throw new IOException(L.T("Неверный формат пакета.")); }
                     string relative = name.Substring(11); string target = Child(stage, relative);
                     if (name.EndsWith("/")) { Directory.CreateDirectory(target); continue; }
-                    if (!seen.Add(relative) || (total += entry.Length) > 1024L * 1024 * 1024) throw new IOException("Некорректный размер или дубликат в пакете.");
-                    if (Reserved(relative)) { if (relative == "portable.flag") continue; throw new IOException("Пакет содержит пользовательские данные."); }
+                    if (!seen.Add(relative) || (total += entry.Length) > 1024L * 1024 * 1024) throw new IOException(L.T("Некорректный размер или дубликат в пакете."));
+                    if (Reserved(relative)) { if (relative == "portable.flag") continue; throw new IOException(L.T("Пакет содержит пользовательские данные.")); }
                     Directory.CreateDirectory(Path.GetDirectoryName(target));
                     using (var input = entry.Open()) using (var output = new FileStream(target, FileMode.CreateNew)) input.CopyTo(output, 65536);
                 }
-            if (!File.Exists(Path.Combine(stage, "ReplayLite.exe")) || !File.Exists(Path.Combine(stage, "UpdateHelper.exe")) || !File.Exists(Path.Combine(stage, "bin", "ffmpeg.exe"))) throw new IOException("Пакет неполный.");
+            if (!File.Exists(Path.Combine(stage, "ReplayLite.exe")) || !File.Exists(Path.Combine(stage, "UpdateHelper.exe")) || !File.Exists(Path.Combine(stage, "bin", "ffmpeg.exe"))) throw new IOException(L.T("Пакет неполный."));
             return stage;
         }
         public static void Apply(string stage, string root, bool portable)
         {
-            if (Path.GetFullPath(stage).TrimEnd('\\').Equals(Path.GetFullPath(root).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) throw new IOException("Папки пакета и программы совпадают.");
+            if (Path.GetFullPath(stage).TrimEnd('\\').Equals(Path.GetFullPath(root).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) throw new IOException(L.T("Папки пакета и программы совпадают."));
             Directory.CreateDirectory(root);
-            if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0) throw new IOException("Установка в ссылку не поддерживается.");
+            if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0) throw new IOException(L.T("Установка в ссылку не поддерживается."));
             var files = Directory.GetFiles(stage, "*", SearchOption.AllDirectories).Select(p => p.Substring(stage.TrimEnd('\\').Length + 1)).Where(p => !Reserved(p)).ToList();
             files.Add("package-files.txt"); files.Add(portable ? "portable.flag" : "installed.flag");
             string backup = Path.Combine(Path.GetTempPath(), "ReplayLite-backup-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(backup);
@@ -73,7 +73,7 @@ namespace ReplayLite
                     try { string destination = Child(root, relative), copy = Child(backup, relative); if (File.Exists(copy)) File.Copy(copy, destination, true); else if (File.Exists(destination)) File.Delete(destination); }
                     catch (IOException) { keepBackup = true; } catch (UnauthorizedAccessException) { keepBackup = true; }
                 }
-                if (keepBackup) throw new IOException("Не удалось полностью восстановить файлы. Резервная копия: " + backup, original);
+                if (keepBackup) throw new IOException(L.T("Не удалось полностью восстановить файлы. Резервная копия: ") + backup, original);
                 throw;
             }
             finally { if (!keepBackup) Cleanup(backup); }

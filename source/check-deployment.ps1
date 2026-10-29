@@ -3,7 +3,7 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($f
 $appRoot = Split-Path -Parent $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $test = Join-Path $appRoot '.deps-cache\DeploymentTests.exe'
-& $compiler /nologo /target:exe /main:ReplayLite.DeploymentTests /platform:x64 /optimize+ /codepage:65001 "/out:$test" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "$PSScriptRoot\Deployment.cs" "$PSScriptRoot\UpdateHelper.cs" "$PSScriptRoot\Updates.cs" "$PSScriptRoot\Ui.cs" "$PSScriptRoot\DeploymentTests.cs"
+& $compiler /nologo /target:exe /main:ReplayLite.DeploymentTests /platform:x64 /optimize+ /codepage:65001 "/out:$test" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "$PSScriptRoot\Locale.cs" "$PSScriptRoot\LocalizedUi.cs" "$PSScriptRoot\WindowTheme.cs" "/resource:$PSScriptRoot\Localization.tsv,ReplayLite.Localization.tsv" "$PSScriptRoot\Deployment.cs" "$PSScriptRoot\UpdateHelper.cs" "$PSScriptRoot\Updates.cs" "/resource:$appRoot\.deps-cache\lucide-atlas.png,ReplayLite.Lucide.png" "$PSScriptRoot\LucideAssets.cs" "$PSScriptRoot\Ui.cs" "$PSScriptRoot\DeploymentTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Deployment test compiler failed' }
 & $compiler /nologo /target:winexe /platform:x64 "/out:$appRoot\.deps-cache\Fixture-old.exe" "$PSScriptRoot\UpdateFixture.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Old fixture compiler failed' }

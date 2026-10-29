@@ -79,7 +79,7 @@ namespace ReplayLite
         { try { string root = Path.GetPathRoot(path); return Path.IsPathRooted(path) && root.Length >= 3 && (root.StartsWith(@"\\") || root.EndsWith(@"\")) && Path.GetFullPath(path).Length > 0 && path.IndexOfAny(new[] { '\r', '\n' }) < 0; } catch (ArgumentException) { return false; } catch (NotSupportedException) { return false; } catch (PathTooLongException) { return false; } }
         internal void SaveToFile(string file)
         {
-            if (!string.IsNullOrEmpty(BufferFolder) && !ValidAbsolutePath(BufferFolder)) throw new ArgumentException("Укажите абсолютный путь папки буфера.");
+            if (!string.IsNullOrEmpty(BufferFolder) && !ValidAbsolutePath(BufferFolder)) throw new ArgumentException(L.T("Укажите абсолютный путь папки буфера."));
             ValidatePreferences(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
             string target = file, pending = target + ".new";
             string storedFolder = Folder, appPrefix = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\') + "\\";
@@ -230,7 +230,7 @@ namespace ReplayLite
             get
             {
                 bool system = audio.Any(a => a.SystemAudio && a.Available), mic = audio.Any(a => !a.SystemAudio && a.Available);
-                return system && mic ? "Компьютер и микрофон" : system ? "Только звук компьютера" : mic ? "Только микрофон" : "Без звука";
+                return system && mic ? L.T("Компьютер и микрофон") : system ? L.T("Только звук компьютера") : mic ? L.T("Только микрофон") : L.T("Без звука");
             }
         }
         public double BufferedSeconds { get { lock (gate) { var a = ReadSegments(); return a.Count == 0 ? 0 : Math.Min(Config.Seconds, a.Last().End - a.First().Start); } } }
@@ -265,9 +265,9 @@ namespace ReplayLite
         public string ErrorLog { get { lock (logGate) return string.Join(Environment.NewLine, errors.ToArray()); } }
         public async Task StartAsync()
         {
-            if (!File.Exists(ffmpeg)) throw new FileNotFoundException("Не найден bin\\ffmpeg.exe. Распакуй всю папку приложения.");
+            if (!File.Exists(ffmpeg)) throw new FileNotFoundException(L.T("Не найден bin\\ffmpeg.exe. Распакуй всю папку приложения."));
             Directory.CreateDirectory(Config.Folder);
-            if (!Settings.ValidAbsolutePath(Config.BufferHome)) throw new ArgumentException("Укажите абсолютный путь папки буфера.");
+            if (!Settings.ValidAbsolutePath(Config.BufferHome)) throw new ArgumentException(L.T("Укажите абсолютный путь папки буфера."));
             Directory.CreateDirectory(Config.BufferHome);
             session = Path.Combine(Config.BufferHome, "buffer-" + Guid.NewGuid().ToString("N"));
             savedLastSegment = null;
@@ -290,9 +290,9 @@ namespace ReplayLite
                 if (captureLauncher == null)
                 {
                     var monitor = MonitorCatalog.Enumerate().FirstOrDefault(m => m.CanCapture && (!string.IsNullOrEmpty(Config.MonitorId) ? string.Equals(m.Id, Config.MonitorId, StringComparison.OrdinalIgnoreCase) : m.Adapter == Config.DisplayAdapter && m.Output == Config.Display));
-                    if (monitor == null) throw new CaptureUnavailableException("Выбранный монитор временно недоступен.");
+                    if (monitor == null) throw new CaptureUnavailableException(L.T("Выбранный монитор временно недоступен."));
                     Config.DisplayAdapter = monitor.Adapter; Config.Display = monitor.Output; Config.Rotation = monitor.Rotation; captureMonitor = monitor.Handle;
-                    if (graphicsCapture && captureMonitor == IntPtr.Zero) throw new CaptureUnavailableException("Windows не вернула дескриптор выбранного монитора.");
+                    if (graphicsCapture && captureMonitor == IntPtr.Zero) throw new CaptureUnavailableException(L.T("Windows не вернула дескриптор выбранного монитора."));
                 }
                 Config.ValidatePreferences();
                 if (Config.Audio == "both" || Config.Audio == "system") audio.Add(new AudioPipe(true, Config.SystemDevice, Config.SystemVolume));
@@ -319,17 +319,17 @@ namespace ReplayLite
                     await Task.Delay(100, token);
                     Native.ThrowIfSessionEnding();
                     if (Failure != null) throw new Exception(Failure);
-                    if (process.HasExited) throw new Exception("Захват не запущен. Проверь экран и драйвер NVIDIA.");
+                    if (process.HasExited) throw new Exception(L.T("Захват не запущен. Проверь экран и драйвер NVIDIA."));
                     lock (gate) { var completed = ReadCurrentSegments(); if (completed.Count > 0) { lastCompletedSegment = completed.Last().Name; lastProgressTick = Stopwatch.GetTimestamp(); return; } }
                 }
-                throw new TimeoutException("За 16 секунд не появился видеобуфер.");
+                throw new TimeoutException(L.T("За 16 секунд не появился видеобуфер."));
             }
             catch (Exception e) { startupError = e; }
             await StopPipelineAsync();
             if (!(startupError is OperationCanceledException))
             {
                 string diagnostic = startupError.Message + "\n" + ErrorLog;
-                if (CaptureRecovery.UnsupportedEncoder(diagnostic)) throw new IOException("Видеокарта или драйвер не поддерживает выбранный кодек " + Config.Codec.ToUpperInvariant() + ". Выберите другой кодек в настройках видео.\n" + diagnostic, startupError);
+                if (CaptureRecovery.UnsupportedEncoder(diagnostic)) throw new IOException(L.T("Видеокарта или драйвер не поддерживает выбранный кодек ") + Config.Codec.ToUpperInvariant() + L.T(". Выберите другой кодек в настройках видео.\n") + diagnostic, startupError);
                 if (startupError is TimeoutException) throw new TimeoutException(diagnostic, startupError);
                 if (launched || startupError is CaptureUnavailableException) throw new CaptureUnavailableException(diagnostic, startupError);
                 throw new IOException(diagnostic, startupError);
@@ -367,7 +367,7 @@ namespace ReplayLite
         {
             long required = (long)((Config.Mbps * 1000000.0 / 8 + 24000) * (Config.Seconds + 12) * 1.2) + 128 * 1024 * 1024;
             required = Math.Max(required, MinimumFreeBytes);
-            if (ReadFreeSpace() < required) throw new IOException("Недостаточно места для буфера: нужно примерно " + (required / 1048576) + " МБ.");
+            if (ReadFreeSpace() < required) throw new IOException(L.T("Недостаточно места для буфера: нужно примерно ") + (required / 1048576) + L.T(" МБ."));
         }
         long ReadFreeSpace() { return availableSpace == null ? new DriveInfo(Path.GetPathRoot(session)).AvailableFreeSpace : availableSpace(session); }
         internal long MinimumFreeBytes { get { return (long)(Config.StopWhenLowSpace ? Math.Max(128, Math.Min(10240, Config.FreeSpaceMb)) : 128) * 1048576; } }
@@ -379,14 +379,14 @@ namespace ReplayLite
                 lock (gate)
                 {
                     if (stopping || recovering || process == null) return;
-                    if (process.HasExited) { captureFault = "Процесс захвата завершился."; return; }
-                    foreach (var a in audio) if (a.Failure != null) { Failure = "Ошибка аудиоустройства: " + a.Failure; return; }
+                    if (process.HasExited) { captureFault = L.T("Процесс захвата завершился."); return; }
+                    foreach (var a in audio) if (a.Failure != null) { Failure = L.T("Ошибка аудиоустройства: ") + a.Failure; return; }
                     var completed = ReadCurrentSegments();
                     if (completed.Count > 0 && completed.Last().Name != lastCompletedSegment)
                     { lastCompletedSegment = completed.Last().Name; lastProgressTick = Stopwatch.GetTimestamp(); }
                     // WGC may legitimately wait on a static desktop; DDA is configured to produce regular frames.
                     if (!graphicsCapture && lastProgressTick != 0 && (Stopwatch.GetTimestamp() - lastProgressTick) / (double)Stopwatch.Frequency >= 15)
-                        captureFault = "Захват не выдаёт новые видеосегменты более 15 секунд.";
+                        captureFault = L.T("Захват не выдаёт новые видеосегменты более 15 секунд.");
                     var all = Directory.GetFiles(session, "s*" + SegmentExtension).OrderBy(p => p, StringComparer.Ordinal).ToArray();
                     int keep = Config.Seconds / 2 + 5;
                     retainedSegments.RemoveAll(s => (savedLastSegment != null && string.CompareOrdinal(s.Name, savedLastSegment) <= 0) || !File.Exists(Path.Combine(session, s.Name)));
@@ -396,10 +396,10 @@ namespace ReplayLite
                         if (consumed) TryDeleteConsumed(all[i]);
                         else if (i < all.Length - keep) File.Delete(all[i]);
                     }
-                    if (ReadFreeSpace() < MinimumFreeBytes) Failure = "На диске осталось менее " + (MinimumFreeBytes / 1048576) + " МБ; запись остановлена.";
+                    if (ReadFreeSpace() < MinimumFreeBytes) Failure = L.T("На диске осталось менее ") + (MinimumFreeBytes / 1048576) + L.T(" МБ; запись остановлена.");
                 }
             }
-            catch (Exception e) { if (!stopping && !recovering) Failure = "Ошибка буфера: " + e.Message; }
+            catch (Exception e) { if (!stopping && !recovering) Failure = L.T("Ошибка буфера: ") + e.Message; }
         }
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern bool CreateHardLink(string newFile, string existingFile, IntPtr security);
@@ -411,12 +411,12 @@ namespace ReplayLite
         }
         public async Task<string> SaveAsync()
         {
-            if (!await saver.WaitAsync(0)) throw new InvalidOperationException("Предыдущий повтор ещё сохраняется.");
+            if (!await saver.WaitAsync(0)) throw new InvalidOperationException(L.T("Предыдущий повтор ещё сохраняется."));
             string snapshot = null, output = null, partial = null;
             string exportedLast = null;
             try
             {
-                if (!Running) throw new InvalidOperationException("Сначала включи буфер.");
+                if (!Running) throw new InvalidOperationException(L.T("Сначала включи буфер."));
                 double previous;
                 lock (gate) { var a = ReadSegments(); previous = a.Count == 0 ? -1 : a.Last().End; }
                 // Include the moment the hotkey was pressed by waiting for the current GOP to close.
@@ -428,7 +428,7 @@ namespace ReplayLite
                 lock (gate)
                 {
                     var a = ReadSegments();
-                    if (a.Count == 0) throw new InvalidOperationException("Буфер пока пуст.");
+                    if (a.Count == 0) throw new InvalidOperationException(L.T("Буфер пока пуст."));
                     double end = a.Last().End;
                     var selected = a.Where(s => s.End > end - Config.Seconds + 0.05).ToArray();
                     exportedLast = selected.Last().Name;
@@ -449,8 +449,8 @@ namespace ReplayLite
                 var log = new StringBuilder();
                 using (var remux = Launch(ffmpeg, new[] { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-display_rotation:v:0", OutputRotation.ToString(CultureInfo.InvariantCulture), "-i", "list.ffconcat", "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc" }.Concat(Config.Container == "mp4" ? new[] { "-movflags", "+faststart" } : new string[0]).Concat(new[] { partial }).ToArray(), snapshot, line => { lock (log) { if (log.Length < 12000) log.AppendLine(line); } }))
                 {
-                    await Task.Run(delegate { if (!remux.WaitForExit(60000)) { remux.Kill(); remux.WaitForExit(); throw new TimeoutException("Сохранение заняло больше минуты."); } remux.WaitForExit(); });
-                    if (remux.ExitCode != 0) throw new IOException("Не удалось сохранить повтор.\n" + log);
+                    await Task.Run(delegate { if (!remux.WaitForExit(60000)) { remux.Kill(); remux.WaitForExit(); throw new TimeoutException(L.T("Сохранение заняло больше минуты.")); } remux.WaitForExit(); });
+                    if (remux.ExitCode != 0) throw new IOException(L.T("Не удалось сохранить повтор.\n") + log);
                 }
                 File.Move(partial, output);
                 lock (gate)
@@ -476,7 +476,7 @@ namespace ReplayLite
         internal async Task RecoverAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
-            if (stopping || session == null) throw new InvalidOperationException("Буфер остановлен.");
+            if (stopping || session == null) throw new InvalidOperationException(L.T("Буфер остановлен."));
             await saver.WaitAsync(token);
             try
             {
@@ -537,9 +537,9 @@ namespace ReplayLite
                     while (!probe.HasExited && deadline.ElapsedMilliseconds < 5000)
                     { await Task.Delay(100, token); Native.ThrowIfSessionEnding(); }
                     token.ThrowIfCancellationRequested(); Native.ThrowIfSessionEnding();
-                    if (!probe.HasExited) throw new TimeoutException("Не удалось проверить формат видеобуфера.");
+                    if (!probe.HasExited) throw new TimeoutException(L.T("Не удалось проверить формат видеобуфера."));
                     probe.WaitForExit(); string result = (await output).Trim(); string diagnostic = await error;
-                    if (probe.ExitCode != 0 || result.Length == 0) throw new IOException("Не удалось прочитать видеобуфер. " + diagnostic);
+                    if (probe.ExitCode != 0 || result.Length == 0) throw new IOException(L.T("Не удалось прочитать видеобуфер. ") + diagnostic);
                     return result;
                 }
                 finally { try { if (!probe.HasExited) { probe.Kill(); probe.WaitForExit(1000); } } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { } }
@@ -577,7 +577,7 @@ namespace ReplayLite
         internal static bool SessionEnding { get { return sessionEnding || GetSystemMetrics(0x2000) != 0; } }
         internal static void SetSessionEnding(bool ending) { sessionEnding = ending; }
         internal static void ThrowIfSessionEnding()
-        { if (SessionEnding) throw new OperationCanceledException("Windows завершает сеанс."); }
+        { if (SessionEnding) throw new OperationCanceledException(L.T("Windows завершает сеанс.")); }
         internal static void StopChildrenForShutdown()
         { lock (jobGate) { if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; } } }
         [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
@@ -622,7 +622,7 @@ namespace ReplayLite
         [STAThread]
         static int Main(string[] args)
         {
-            Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+            L.InitializeFromSettings(AppDomain.CurrentDomain.BaseDirectory); Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             if (args.Length == 2 && args[0] == "--preferences-hardware-test") return PreferencesTests.Hardware(args[1]).GetAwaiter().GetResult();
             if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run(args).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
@@ -671,7 +671,7 @@ namespace ReplayLite
             {
                 bool automaticCapture = Array.IndexOf(args, "--startup") >= 0;
                 bool launchInTray = automaticCapture || Settings.Load().StartMinimized;
-                if (!SingletonCreated) { if (!launchInTray) MessageBox.Show("ReplayLite уже запущен. Открой его из трея."); return 0; }
+                if (!SingletonCreated) { if (!launchInTray) MessageBox.Show(L.T("ReplayLite уже запущен. Открой его из трея.")); return 0; }
                 using (var form = new MainForm(launchInTray))
                 {
                     if (!launchInTray) Application.Run(form);

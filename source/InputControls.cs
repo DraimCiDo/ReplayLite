@@ -22,16 +22,18 @@ namespace ReplayLite
         protected override void OnForeColorChanged(EventArgs e) { base.OnForeColorChanged(e); if (editor != null) editor.ForeColor = ForeColor; }
         protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); LayoutEditor(); }
         void LayoutEditor() { if (editor != null) editor.SetBounds(10, Math.Max(3, (Height - editor.PreferredHeight) / 2), Math.Max(1, Width - 20), editor.PreferredHeight); }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); editor.Visible = Enabled; Invalidate(); }
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 9))
             using (var fill = new SolidBrush(Theme.Input)) using (var line = new Pen(Theme.Border)) { e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(line, path); }
+            if (!Enabled) TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(10, 0, Width - 20, Height), Theme.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
     }
     sealed class PathDisplay : Control
     {
-        readonly Bitmap folderIcon = MenuIcons.Draw(16, MenuGlyph.Folder);
+
         public PathDisplay() { Theme.Canvas(this); AccessibleRole = AccessibleRole.Text; TabStop = false; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
         protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
         protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
@@ -40,10 +42,10 @@ namespace ReplayLite
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 9))
             using (var fill = new SolidBrush(Theme.Input)) using (var line = new Pen(Theme.Border)) { e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(line, path); }
-            e.Graphics.DrawImage(folderIcon, 12, (Height - 16) / 2, 16, 16);
+            LucideAssets.Draw(e.Graphics, "folder", new Rectangle(12, (Height - 16) / 2, 16, 16), Theme.Muted);
             TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(37, 0, Width - 47, Height), Enabled ? Theme.Text : Theme.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.PathEllipsis | TextFormatFlags.NoPrefix);
         }
-        protected override void Dispose(bool disposing) { if (disposing) folderIcon.Dispose(); base.Dispose(disposing); }
+
     }
     sealed class SettingsScrollPanel : Panel
     {
@@ -85,7 +87,7 @@ namespace ReplayLite
     {
         int offset, total, viewport, dragOffset; bool dragging;
         public event Action<int> OffsetRequested;
-        public SettingsScrollThumb() { BackColor = Theme.Card; AccessibleName = "Прокрутка настроек"; AccessibleRole = AccessibleRole.ScrollBar; TabStop = true; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        public SettingsScrollThumb() { BackColor = Theme.Card; AccessibleName = L.T("Прокрутка настроек"); AccessibleRole = AccessibleRole.ScrollBar; TabStop = true; SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
         internal void SetMetrics(int value, int content, int visible) { offset = value; total = content; viewport = visible; Invalidate(); }
         Rectangle ThumbBounds
         {
@@ -190,13 +192,14 @@ namespace ReplayLite
         protected override void OnSizeChanged(EventArgs e) { editor.SetBounds(12, Math.Max(3, (Height - editor.PreferredHeight) / 2), Math.Max(20, Width - 50), editor.PreferredHeight); base.OnSizeChanged(e); }
         protected override void OnMouseDown(MouseEventArgs e) { if (Enabled && e.Button == MouseButtons.Left) { if (e.X >= Width - 33) Value = Value + (e.Y < Height / 2 ? 1 : -1); else editor.Focus(); } base.OnMouseDown(e); }
         protected override void OnMouseWheel(MouseEventArgs e) { bool inSettings = false; for (Control parent = Parent; parent != null; parent = parent.Parent) if (parent is SettingsScrollPanel) { inSettings = true; break; } if (ContainsFocus && !inSettings) Value = Value + Math.Sign(e.Delta); base.OnMouseWheel(e); }
-        protected override void OnEnabledChanged(EventArgs e) { editor.ForeColor = Enabled ? Theme.Text : Theme.Muted; Invalidate(); base.OnEnabledChanged(e); }
+        protected override void OnEnabledChanged(EventArgs e) { editor.Visible = Enabled; editor.ForeColor = Theme.Text; Invalidate(); base.OnEnabledChanged(e); }
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 9)) using (var brush = new SolidBrush(Theme.Input)) using (var pen = new Pen(ContainsFocus ? Theme.Accent : Theme.Border)) { e.Graphics.FillPath(brush, path); e.Graphics.DrawPath(pen, path); }
             int x = Width - 21;
-            using (var pen = new Pen(Theme.Muted, 1.5f)) { e.Graphics.DrawLines(pen, new[] { new Point(x - 4, 15), new Point(x, 11), new Point(x + 4, 15) }); e.Graphics.DrawLines(pen, new[] { new Point(x - 4, Height - 15), new Point(x, Height - 11), new Point(x + 4, Height - 15) }); }
+            if (!Enabled) TextRenderer.DrawText(e.Graphics, value.ToString(CultureInfo.InvariantCulture), Font, new Rectangle(12, 0, Width - 50, Height), Theme.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            LucideAssets.Draw(e.Graphics, "chevron-up", new Rectangle(x - 6, 6, 12, 12), Theme.Muted); LucideAssets.Draw(e.Graphics, "chevron-down", new Rectangle(x - 6, Height - 18, 12, 12), Theme.Muted);
         }
     }
     public struct KeyBinding
@@ -254,7 +257,7 @@ namespace ReplayLite
         {
             e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 9)) using (var brush = new SolidBrush(Theme.Input)) using (var pen = new Pen(Error ? Theme.Red : IsCapturing ? Theme.Accent : Theme.Border)) { e.Graphics.FillPath(brush, path); e.Graphics.DrawPath(pen, path); }
-            TextRenderer.DrawText(e.Graphics, IsCapturing ? "Нажми сочетание…" : Binding.ToString(), Font, new Rectangle(11, 0, Width - 22, Height), Enabled ? Theme.Text : Theme.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(e.Graphics, IsCapturing ? L.T("Нажми сочетание…") : Binding.ToString(), Font, new Rectangle(11, 0, Width - 22, Height), Enabled ? Theme.Text : Theme.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
     // Capture only while editing. Normal global shortcuts continue to use RegisterHotKey without polling or hooks.
