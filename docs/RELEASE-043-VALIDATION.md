@@ -43,4 +43,14 @@
 
 ## Упаковка и публикация
 
-Локальные package.ps1, check-deployment.ps1 и check-installer.ps1 прошли с кодами 0: свежий комплект, настоящий установщик в обоих режимах, обновление/откат/перезапуск. SHA-256 локального EXE: `D9093E866B169187258FFD2CA737E90FD8B03A9F95D3FE47E42C72871FA4EB75`. Публикация/CI и скачанные SHA-256 проверяются следующим этапом; до него доставка не завершена.
+Опубликован [v0.4.3](https://github.com/DraimCiDo/ReplayLite/releases/tag/v0.4.3), стабильный Latest, не draft/prerelease. Тег: `6ecefc9734da17c1cf387d03fca132575ddecb16`. [Workflow 40871542892](https://github.com/DraimCiDo/ReplayLite/actions/runs/40871542892) — success, включая библиотеку/плеер без NVIDIA, build и release.
+
+Скачаны четыре обязательных файла. SHA-256 совпали с SHA256SUMS.txt; EXE 0.4.3.0, VERSION в ZIP и совпадение отдельного EXE с EXE внутри ZIP проверены, код 0.
+
+| Файл | SHA-256 опубликованного файла |
+| --- | --- |
+| ReplayLite-Portable.zip | `86B59257C77D3F3AEF2D3CFD414115FDD6EACB9B301676AF98B8015662FF50A5` |
+| ReplayLite-Setup.exe | `86EC235197B9E85C2CEDB80719546A65F7204A82B192E7637720E6CF1AD63772` |
+| ReplayLite.exe | `D24C412179E92C106ADBB1DBDA7106204A5749856E9B949DBB919A1C13EF9804` |
+
+Локальные package.ps1, check-deployment.ps1 и check-installer.ps1 прошли с кодами 0: свежий комплект, настоящий установщик в обоих режимах, обновление/откат/перезапуск. SHA-256 локального EXE: `D9093E866B169187258FFD2CA737E90FD8B03A9F95D3FE47E42C72871FA4EB75`. Публикация, CI и скачанные SHA-256 завершены успешно, результаты приведены выше.
