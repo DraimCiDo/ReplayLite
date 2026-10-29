@@ -1,0 +1,127 @@
+<div id="replaylite-settings-review">
+  <style>
+    #replaylite-settings-review { --rl-bg:#0c1118; --rl-panel:#171e28; --rl-field:#202936; --rl-border:#2c3948; --rl-text:#edf4fc; --rl-muted:#a5b5c8; --rl-accent:#47dab1; --rl-ink:#09271f; font-family:'Segoe UI',sans-serif; }
+    #replaylite-settings-review .rl-stage { min-height:var(--rl-stage-height,650px); }
+    #replaylite-settings-review .rl-window { background:var(--rl-bg); color:var(--rl-text); border:1px solid var(--rl-border); border-radius:14px; padding:20px; font-size:14px; line-height:1.4; }
+    #replaylite-settings-review .rl-header { display:flex; align-items:center; gap:12px; padding-bottom:23px; flex-wrap:wrap; }
+    #replaylite-settings-review .rl-brand { display:flex; align-items:center; gap:10px; font-size:25px; font-weight:600; }
+    #replaylite-settings-review .rl-logo { width:36px; height:36px; display:grid; place-items:center; color:var(--rl-accent); background:var(--rl-field); border-radius:10px; }
+    #replaylite-settings-review .rl-logo svg { width:25px; height:25px; }
+    #replaylite-settings-review .rl-version { color:var(--rl-muted); font-size:12px; }
+    #replaylite-settings-review .rl-status { margin-left:auto; color:var(--rl-muted); background:var(--rl-panel); padding:7px 15px; border-radius:20px; font-size:12px; }
+    #replaylite-settings-review .rl-toolbar { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+    #replaylite-settings-review .rl-title { font-size:16px; font-weight:600; }
+    #replaylite-settings-review .rl-nav { margin-left:auto; display:flex; gap:5px; }
+    #replaylite-settings-review .rl-nav span { display:grid; place-items:center; padding:8px; border-radius:9px; color:var(--rl-muted); }
+    #replaylite-settings-review .rl-nav .rl-selected { color:var(--rl-accent); background:var(--rl-field); }
+    #replaylite-settings-review .rl-nav svg { width:19px; height:19px; }
+    #replaylite-settings-review .rl-panel { background:var(--rl-panel); border:1px solid var(--rl-border); border-radius:12px; padding:18px; }
+    #replaylite-settings-review .rl-field { display:flex; flex-direction:column; gap:8px; min-width:0; }
+    #replaylite-settings-review .rl-caption { display:flex; align-items:center; gap:6px; min-width:0; }
+    #replaylite-settings-review .rl-caption label { color:var(--rl-text); }
+    #replaylite-settings-review .rl-help { background:transparent; border:0; padding:2px; color:var(--rl-muted); display:inline-flex; align-items:center; border-radius:4px; }
+    #replaylite-settings-review .rl-help svg { width:14px; height:14px; }
+    #replaylite-settings-review select, #replaylite-settings-review input[type=number] { font:inherit; color:var(--rl-text); background:var(--rl-field); border:1px solid var(--rl-border); border-radius:8px; padding:8px 10px; width:100%; min-width:0; height:37px; }
+    #replaylite-settings-review .rl-range { display:flex; align-items:center; gap:12px; min-width:0; }
+    #replaylite-settings-review input[type=range] { accent-color:var(--rl-accent); width:100%; min-width:60px; margin:0; }
+    #replaylite-settings-review output { min-width:43px; text-align:right; color:var(--rl-muted); font-variant-numeric:tabular-nums; }
+    #replaylite-settings-review .rl-switch { width:37px; height:21px; appearance:none; border:1px solid var(--rl-border); border-radius:20px; background:var(--rl-field); position:relative; margin:0; flex:none; }
+    #replaylite-settings-review .rl-switch::after { content:''; position:absolute; top:3px; left:3px; width:13px; height:13px; border-radius:50%; background:var(--rl-muted); }
+    #replaylite-settings-review .rl-switch:checked { background:var(--rl-accent); border-color:var(--rl-accent); }
+    #replaylite-settings-review .rl-switch:checked::after { left:19px; background:var(--rl-ink); }
+    #replaylite-settings-review .rl-radio-group { display:flex; gap:6px; flex-wrap:wrap; border:0; margin:0; padding:0; }
+    #replaylite-settings-review .rl-radio-group label { display:flex; align-items:center; gap:6px; padding:7px 9px; background:var(--rl-field); border:1px solid var(--rl-border); border-radius:7px; font-size:13px; }
+    #replaylite-settings-review input[type=radio] { margin:0; accent-color:var(--rl-accent); }
+    #replaylite-settings-review input:disabled, #replaylite-settings-review select:disabled { opacity:.55; }
+    #replaylite-settings-review .rl-note { margin:0; font-size:12px; color:var(--rl-muted); }
+    #replaylite-settings-review .rl-reset-row { display:flex; justify-content:flex-end; padding-top:16px; }
+    #replaylite-settings-review .rl-reset { color:var(--rl-muted); background:transparent; border:1px solid var(--rl-border); border-radius:7px; padding:6px 14px; font:inherit; font-size:12px; }
+    #replaylite-settings-review .rl-choose { margin-top:14px; }
+    #replaylite-settings-review .rl-rows .rl-field { flex-direction:row; align-items:center; justify-content:space-between; gap:20px; min-height:57px; border-bottom:1px solid var(--rl-border); }
+    #replaylite-settings-review .rl-rows .rl-control { width:48%; max-width:310px; }
+    #replaylite-settings-review .rl-rows .rl-field:last-of-type { border:0; }
+    #replaylite-settings-review .rl-grid { display:grid; grid-template-columns:1fr 1fr; gap:21px 26px; }
+    #replaylite-settings-review .rl-grid .rl-toggle-field { flex-direction:row; align-items:center; justify-content:space-between; min-height:32px; }
+    #replaylite-settings-review .rl-groups { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+    #replaylite-settings-review .rl-section { display:flex; flex-direction:column; gap:20px; min-width:0; }
+    #replaylite-settings-review .rl-section+.rl-section { border-left:1px solid var(--rl-border); padding-left:24px; }
+    #replaylite-settings-review .rl-section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; font-weight:600; }
+    #replaylite-settings-review .rl-section-heading .rl-caption { font-weight:600; }
+    #replaylite-settings-review .rl-wide { grid-column:1/-1; }
+    #replaylite-settings-review [data-help=hover] .rl-help, #replaylite-settings-review [data-help=caption] .rl-help { display:none; }
+    #replaylite-settings-review .rl-note { display:none; }
+    #replaylite-settings-review [data-help=caption] .rl-note { display:block; }
+    #replaylite-settings-review .rl-rows[data-help=caption] .rl-field { flex-wrap:wrap; padding:10px 0; gap:8px 20px; }
+    #replaylite-settings-review .rl-rows .rl-note { width:100%; }
+    @media(max-width:560px) {
+      #replaylite-settings-review .rl-stage { min-height:var(--rl-mobile-height,910px); }
+      #replaylite-settings-review .rl-window { padding:14px; }
+      #replaylite-settings-review .rl-header { gap:8px; }
+      #replaylite-settings-review .rl-brand { font-size:22px; }
+      #replaylite-settings-review .rl-status { margin-left:0; }
+      #replaylite-settings-review .rl-nav { width:100%; justify-content:space-between; }
+      #replaylite-settings-review .rl-grid, #replaylite-settings-review .rl-groups { grid-template-columns:1fr; gap:19px; }
+      #replaylite-settings-review .rl-section+.rl-section { border-left:0; border-top:1px solid var(--rl-border); padding:20px 0 0; }
+      #replaylite-settings-review .rl-rows .rl-field { flex-direction:column; align-items:stretch; gap:8px; padding:12px 0; }
+      #replaylite-settings-review .rl-rows .rl-control { width:100%; max-width:none; }
+      #replaylite-settings-review .rl-rows .rl-toggle-field { flex-direction:row; align-items:center; }
+      #replaylite-settings-review .rl-rows .rl-toggle-field .rl-control { width:auto; }
+    }
+  </style>
+  <div class="viz-carousel" aria-label="Варианты настроек ReplayLite" data-previous-label="Назад" data-next-label="Далее">
+    <section data-variant="Строки"><div class="rl-stage" data-layout="rows"></div></section>
+    <section data-variant="Сетка" hidden><div class="rl-stage" data-layout="grid"></div></section>
+    <section data-variant="Секции" hidden><div class="rl-stage" data-layout="groups"></div></section>
+  </div>
+  <p class="text-small" aria-live="polite" id="rl-selection"></p>
+  <script>
+    (() => {
+      const root=document.getElementById('replaylite-settings-review');
+      const state={language:'ru',help:'icon',palette:'mint'};
+      const text=(ru,en)=>`<span data-ru="${ru}" data-en="${en}">${ru}</span>`;
+      const title=(id,ru,en,tipRu,tipEn)=>`<div class="rl-caption"><label for="${id}" data-tip-ru="${tipRu}" data-tip-en="${tipEn}">${text(ru,en)}</label><button type="button" class="rl-help cursor-interaction" aria-label="${ru}: справка" data-tip-ru="${tipRu}" data-tip-en="${tipEn}"><i data-lucide="circle-question-mark" aria-hidden="true"></i></button></div>`;
+      const note=(ru,en)=>`<p class="rl-note">${text(ru,en)}</p>`;
+      const toggle=(prefix,key,ru,en,tipRu,tipEn)=>`<div class="rl-field rl-toggle-field">${title(prefix+key,ru,en,tipRu,tipEn)}<div class="rl-control"><input class="rl-switch cursor-interaction" type="checkbox" id="${prefix+key}" checked></div>${note(tipRu,tipEn)}</div>`;
+      const volume=(prefix,key,ru,en)=>`<div class="rl-field">${title(prefix+key,ru,en,'Громкость источника в сохранённом клипе. На громкость Windows не влияет.','Source volume in the saved clip. Does not change Windows volume.')}<div class="rl-control rl-range"><input type="range" min="0" max="100" value="100" id="${prefix+key}"><output for="${prefix+key}">100%</output></div>${note('Меняет громкость только в клипе.','Changes volume only in the clip.')}</div>`;
+      const device=prefix=>`<div class="rl-field">${title(prefix+'device','Микрофон','Microphone device','Устройство для записи голоса. «По умолчанию» следует выбору Windows.','Voice input device. Default follows the Windows selection.')}<div class="rl-control"><select id="${prefix}device"><option data-ru="По умолчанию Windows" data-en="Windows default">По умолчанию Windows</option><option>USB Microphone</option></select></div>${note('Выберите устройство для записи голоса.','Choose the device for recording your voice.')}</div>`;
+      const tracks=prefix=>`<div class="rl-field">${title(prefix+'mixed','Аудиодорожки','Audio tracks','Общая дорожка проще для просмотра. Раздельные удобнее при монтаже.','A mixed track is easier to play. Separate tracks are useful for editing.')}<div class="rl-control"><fieldset class="rl-radio-group" aria-label="Audio tracks"><label><input type="radio" id="${prefix}mixed" name="${prefix}tracks" checked>${text('Общая','Mixed')}</label><label><input type="radio" name="${prefix}tracks">${text('Раздельные','Separate')}</label></fieldset></div>${note('Раздельные дорожки удобнее при монтаже.','Separate tracks are useful for editing.')}</div>`;
+      const system=prefix=>toggle(prefix,'system','Звук системы','System audio','Звук игр и приложений с устройства вывода Windows.','Game and app audio from the Windows output device.');
+      const mic=prefix=>toggle(prefix,'mic','Записывать микрофон','Record microphone','Добавляет голос с выбранного микрофона.','Adds voice from the selected microphone.');
+      root.querySelectorAll('[data-layout]').forEach(stage=>{
+        const layout=stage.dataset.layout,prefix='rl-'+layout+'-';
+        let controls;
+        if(layout==='rows') controls=system(prefix)+volume(prefix,'sv','Громкость системы','System volume')+mic(prefix)+volume(prefix,'mv','Громкость микрофона','Microphone volume')+device(prefix)+tracks(prefix);
+        if(layout==='grid') controls=system(prefix)+mic(prefix)+volume(prefix,'sv','Громкость системы','System volume')+volume(prefix,'mv','Громкость микрофона','Microphone volume')+device(prefix)+tracks(prefix);
+        if(layout==='groups') controls=`<div class="rl-section">${system(prefix)}${volume(prefix,'sv','Громкость','Volume')}<div class="rl-field">${title(prefix+'output','Устройство вывода','Output device','Звук системы записывается с устройства Windows по умолчанию.','System audio uses the default Windows output device.')}<div class="rl-control"><select id="${prefix}output" disabled><option data-ru="По умолчанию Windows" data-en="Windows default">По умолчанию Windows</option></select></div></div></div><div class="rl-section">${mic(prefix)}${volume(prefix,'mv','Громкость','Volume')}${device(prefix)}</div><div class="rl-wide">${tracks(prefix)}</div>`;
+        stage.innerHTML=`<div class="rl-window" aria-label="ReplayLite ${layout}"><header class="rl-header"><div class="rl-brand"><span class="rl-logo"><i data-lucide="square-play" aria-hidden="true"></i></span>ReplayLite</div><span class="rl-version">v0.4.1</span><span class="rl-status">● ${text('Не записывает','Not recording')}</span></header><div class="rl-toolbar"><i data-lucide="undo-2" aria-hidden="true"></i><span class="rl-title">${text('Звук','Audio')}</span><div class="rl-nav" role="img" aria-label="Разделы настроек; выбран звук">${['monitor','folder','video','headphones','keyboard','layout-grid'].map(icon=>`<span class="${icon==='headphones'?'rl-selected':''}"><i data-lucide="${icon}" aria-hidden="true"></i></span>`).join('')}</div></div><form class="rl-panel"><div class="rl-${layout}" data-help="icon">${controls}</div><div class="rl-reset-row"><button type="reset" class="rl-reset cursor-interaction">${text('Сброс','Reset')}</button></div></form></div><button class="btn rl-choose" type="button" data-choice="${stage.parentElement.dataset.variant}">${text('Выбрать этот вариант','Choose this layout')}</button>`;
+      });
+      function render(){
+        root.style.setProperty('--rl-stage-height',state.help==='caption'?'780px':'650px');
+        root.style.setProperty('--rl-mobile-height',state.help==='caption'?'1150px':'910px');
+        root.querySelectorAll('[data-ru]').forEach(el=>{el.textContent=el.dataset[state.language];});
+        root.querySelectorAll('[data-help]').forEach(el=>el.dataset.help=state.help);
+        root.querySelectorAll('[data-tip-ru]').forEach(el=>{
+          const content=state.language==='en'?el.dataset.tipEn:el.dataset.tipRu;
+          if((state.help==='icon' && el.tagName==='BUTTON')||(state.help==='hover' && el.tagName==='LABEL'))el.setAttribute('data-tooltip',content);else el.removeAttribute('data-tooltip');
+          if(el.tagName==='BUTTON')el.setAttribute('aria-label',(el.previousElementSibling?.textContent||'')+(state.language==='en'?': help':': справка'));
+        });
+        root.querySelectorAll('input,select').forEach(el=>{
+          const caption=el.closest('.rl-field')?.querySelector('[data-tip-ru]');
+          if(state.help==='hover' && caption)el.setAttribute('data-tooltip',state.language==='en'?caption.dataset.tipEn:caption.dataset.tipRu);else el.removeAttribute('data-tooltip');
+        });
+        const palettes={mint:['#0c1118','#171e28','#202936','#2c3948','#edf4fc','#a5b5c8','#47dab1','#09271f'],ocean:['#0c1118','#171e28','#202936','#2c3948','#edf4fc','#a5b5c8','#58bcff','#092235'],violet:['#111019','#1c1928','#282235','#3b334d','#f3effb','#b9accb','#b99aff','#24163c'],light:['#f3f6f8','#ffffff','#edf2f5','#ced9df','#182b35','#506879','#087e66','#ffffff']};
+        ['bg','panel','field','border','text','muted','accent','ink'].forEach((key,i)=>root.style.setProperty('--rl-'+key,palettes[state.palette][i]));
+      }
+      root.addEventListener('input',event=>{if(event.target.type==='range')event.target.nextElementSibling.textContent=event.target.value+'%';if(event.target.type==='checkbox'){const input=event.target;const prefix=input.id.replace(/(system|mic)$/,'');const keys=input.id.endsWith('system')?['sv']:['mv','device'];keys.forEach(key=>{const target=document.getElementById(prefix+key);if(target)target.disabled=!input.checked;});}});
+      root.querySelectorAll('form').forEach(form=>form.addEventListener('reset',()=>setTimeout(()=>form.querySelectorAll('input[type=range]').forEach(input=>input.nextElementSibling.textContent=input.value+'%'),0)));
+      root.querySelectorAll('[data-choice]').forEach(button=>button.addEventListener('click',async()=>{
+        const helpNames={icon:'Lucide-справка рядом с названием',hover:'подсказка при наведении на название без вопросика',caption:'короткие подписи'};
+        const prompt=`Для ReplayLite выбираю компоновку «${button.dataset.choice}». Объяснения: ${helpNames[state.help]}. Реализуй выбранный вариант с сохранением всех настроек, RU/EN и низкого расхода ресурсов.`;
+        if(window.openai?.sendFollowUpMessage)await window.openai.sendFollowUpMessage({prompt,title:'Выбрать настройки ReplayLite'});
+        else document.getElementById('rl-selection').textContent=prompt;
+      }));
+      render();
+      if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:render});tweak.addSelect(state,'help',{label:'Объяснения',options:[{label:'Значок рядом с названием',value:'icon'},{label:'Наведение на название',value:'hover'},{label:'Короткие подписи',value:'caption'}]});tweak.addSelect(state,'language',{label:'Язык макета',options:[{label:'Русский',value:'ru'},{label:'English',value:'en'}]});tweak.addSelect(state,'palette',{label:'Тема',options:[{label:'Мята',value:'mint'},{label:'Океан',value:'ocean'},{label:'Фиолетовая',value:'violet'},{label:'Светлая',value:'light'}]});}
+    })();
+  </script>
+</div>
