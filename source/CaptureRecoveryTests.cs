@@ -18,7 +18,7 @@ namespace ReplayLite
         {
             internal int Failures, Denials, UnknownExits, ReleaseFrameExits, Width = 64;
             internal readonly List<string> Graphs = new List<string>();
-            internal bool PermanentFailure, EndSessionOnLaunch, CancelStart;
+            internal bool PermanentFailure, EndSessionOnLaunch, CancelStart, BlackFrames;
             internal Process Launch(List<string> production, string session, Action<string> log)
             {
                 Graphs.Add(production[production.IndexOf("-filter_complex") + 1]);
@@ -49,7 +49,7 @@ namespace ReplayLite
                 if (Failures > 0) { Failures--; throw new IOException("[Parsed_ddagrab_0] DuplicateOutput failed: 80070005"); }
                 if (PermanentFailure) throw new IOException("Недостаточно места для буфера");
                 int output = production.FindLastIndex(s => s == "-f");
-                var args = new List<string> { "-v", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=" + Width + "x64:rate=5", "-an", "-c:v", "libx264", "-preset", "ultrafast", "-g", "10", "-bf", "0" };
+                var args = new List<string> { "-v", "error", "-re", "-f", "lavfi", "-i", (BlackFrames ? "color=black:size=" : "testsrc2=size=") + Width + "x64:rate=5", "-an", "-c:v", "libx264", "-preset", "ultrafast", "-g", "10", "-bf", "0" };
                 args.AddRange(new[] { "-enc_time_base:v", production[production.IndexOf("-enc_time_base:v") + 1], "-fps_mode", production[production.IndexOf("-fps_mode") + 1] });
                 args.AddRange(production.Skip(output));
                 var process = Recorder.Launch(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe"), args, session, log);
@@ -61,6 +61,58 @@ namespace ReplayLite
         { return (List<Segment>)typeof(Recorder).GetMethod("ReadSegments", Private).Invoke(recorder, null); }
         static string Session(Recorder recorder) { return (string)typeof(Recorder).GetField("session", Private).GetValue(recorder); }
         static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
+        internal static async Task<int> ImageTest(string root)
+        {
+            Directory.CreateDirectory(root); var report = new StringBuilder();
+            try
+            {
+                foreach (bool graphics in new[] { false, true })
+                {
+                    var capture = new Capture { BlackFrames = true }; bool alternateVisible = false; int probes = 0;
+                    using (var recorder = new Recorder(new Settings { Seconds = 30, Fps = 30, Audio = "none", Folder = root }, capture.Launch, null,
+                        token => { token.ThrowIfCancellationRequested(); probes++; return Task.FromResult(Enumerable.Repeat((byte)(alternateVisible ? 180 : 0), 64 * 36).ToArray()); }))
+                    {
+                        typeof(Recorder).GetField("graphicsCapture", Private).SetValue(recorder, graphics);
+                        await recorder.StartAsync();
+                        await recorder.CheckImageHealthAsync(CancellationToken.None);
+                        Assert(!recorder.NeedsRecovery && probes == 0, "One dark segment triggered recovery");
+                        await recorder.CheckImageHealthAsync(CancellationToken.None);
+                        Assert(probes == 0, "Image check interval was not bounded");
+                        typeof(Recorder).GetField("lastImageCheck", Private).SetValue(recorder, 0L);
+                        await recorder.CheckImageHealthAsync(CancellationToken.None);
+                        Assert(probes == 0, "Same black segment was counted twice");
+                        string first = Segments(recorder).Last().Name;
+                        var deadline = Stopwatch.StartNew();
+                        while (Segments(recorder).Last().Name == first && deadline.ElapsedMilliseconds < 5000) await Task.Delay(100);
+                        Assert(Segments(recorder).Last().Name != first, "No second black fixture segment");
+                        typeof(Recorder).GetField("lastImageCheck", Private).SetValue(recorder, 0L);
+                        await recorder.CheckImageHealthAsync(CancellationToken.None);
+                        Assert(!recorder.NeedsRecovery && probes == 1, "Genuinely dark desktop triggered recovery");
+                        alternateVisible = true;
+                        typeof(Recorder).GetField("lastImageCheck", Private).SetValue(recorder, 0L);
+                        await recorder.CheckImageHealthAsync(CancellationToken.None);
+                        Assert(recorder.Running && recorder.NeedsRecovery && probes == 2, "Live encoder writing black segments was treated as healthy");
+                        capture.BlackFrames = false;
+                        await recorder.RecoverAsync(CancellationToken.None);
+                        Assert(recorder.UsingGraphicsCapture != graphics && !recorder.NeedsRecovery && recorder.BufferResetOnRecovery, "Confirmed black source did not switch and reset its bad buffer");
+                        await recorder.CheckImageHealthAsync(CancellationToken.None);
+                        Assert(!recorder.NeedsRecovery && probes == 2, "Visible image incorrectly probed alternate source");
+                        string clip = await recorder.SaveAsync(); await Decode(clip);
+                        var pixels = await ClipProcess.Read("ffmpeg.exe", new[] { "-v", "error", "-i", clip, "-an", "-frames:v", "1", "-vf", "scale=64:36,format=gray", "-f", "rawvideo", "pipe:1" }, 64 * 36, CancellationToken.None);
+                        Assert(Recorder.ImageHasContent(pixels), "Export after recovery still contains black video");
+                        using (var cancel = new CancellationTokenSource())
+                        { cancel.Cancel(); bool canceled = false; try { await recorder.CheckImageHealthAsync(cancel.Token); } catch (OperationCanceledException) { canceled = true; } Assert(canceled, "Image check ignored cancellation"); }
+                        await recorder.StopAsync();
+                        Assert(ClipProcess.Active == 0 && !recorder.Running, "Image check leaked media process");
+                    }
+                    report.AppendLine((graphics ? "WGC_TO_DDA" : "DDA_TO_WGC") + "_BLACK_SEGMENTS_RECOVER_VISIBLE_EXPORT: PASS");
+                }
+                report.AppendLine("DARK_SCENE_SAME_SEGMENT_RATE_LIMIT_CANCELLATION_AND_PROCESS_CLEANUP: PASS");
+                File.WriteAllText(Path.Combine(root, "capture-image-test.txt"), report.ToString(), new UTF8Encoding(false)); return 0;
+            }
+            catch (Exception error)
+            { report.AppendLine("FAIL: " + error); File.WriteAllText(Path.Combine(root, "capture-image-test.txt"), report.ToString(), new UTF8Encoding(false)); return 1; }
+        }
         static string Hash(string path)
         { using (var hash = SHA256.Create()) using (var file = File.OpenRead(path)) return Convert.ToBase64String(hash.ComputeHash(file)); }
         static async Task LoseDesktop(Recorder recorder, string diagnostic = "[Parsed_ddagrab_0] DDA ReleaseFrame failed!")

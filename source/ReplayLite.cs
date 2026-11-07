@@ -210,6 +210,10 @@ namespace ReplayLite
         IntPtr captureMonitor;
         string captureFault, lastCompletedSegment;
         long lastProgressTick;
+        long lastImageCheck;
+        string lastBlackSegment;
+        bool resetBlackBuffer;
+        readonly Func<CancellationToken, Task<byte[]>> alternateImageProbe;
         public bool UsingGraphicsCapture { get { return graphicsCapture; } }
         internal int OutputRotation { get { return graphicsCapture ? 0 : Config.Rotation; } }
         public bool NeedsRecovery { get { lock (gate) { return !stopping && session != null && Failure == null && (captureFault != null || (process != null && process.HasExited)); } } }
@@ -235,7 +239,52 @@ namespace ReplayLite
         }
         public double BufferedSeconds { get { lock (gate) { var a = ReadSegments(); return a.Count == 0 ? 0 : Math.Min(Config.Seconds, a.Last().End - a.First().Start); } } }
         public Recorder(Settings settings) { Config = settings; }
-        internal Recorder(Settings settings, Func<List<string>, string, Action<string>, Process> launcher, Func<string, long> space = null) { Config = settings; captureLauncher = launcher; availableSpace = space; }
+        internal Recorder(Settings settings, Func<List<string>, string, Action<string>, Process> launcher, Func<string, long> space = null, Func<CancellationToken, Task<byte[]>> imageProbe = null) { Config = settings; captureLauncher = launcher; availableSpace = space; alternateImageProbe = imageProbe; }
+
+        string CaptureSource(bool graphics)
+        {
+            return graphics
+                ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=" + (Config.CaptureCursor ? "1" : "0") + ":display_border=0"
+                : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=" + (Config.CaptureCursor ? "1" : "0");
+        }
+        internal static bool ImageHasContent(byte[] pixels)
+        {
+            if (pixels == null || pixels.Length != 64 * 36) throw new IOException("Incomplete capture health image.");
+            // Ignore compression noise and a small cursor on an otherwise black surface.
+            return pixels.Count(p => p > 32) > pixels.Length / 100;
+        }
+        internal Task<byte[]> ReadAlternateImageAsync(CancellationToken token)
+        {
+            return alternateImageProbe != null ? alternateImageProbe(token) : ClipProcess.Read("ffmpeg.exe", new[] {
+                "-v", "error", "-nostdin", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture",
+                "-filter_complex", CaptureSource(!graphicsCapture) + ",hwdownload,format=bgra,scale=64:36,format=gray[v]", "-map", "[v]", "-an", "-frames:v", "1", "-threads", "1", "-f", "rawvideo", "pipe:1" }, 64 * 36, token);
+        }
+        internal async Task CheckImageHealthAsync(CancellationToken token)
+        {
+            if (captureLauncher != null && alternateImageProbe == null) return;
+            if (!await saver.WaitAsync(0, token)) return;
+            try
+            {
+                if (!Running || recovering || NeedsRecovery || Failure != null) return;
+                long now = Stopwatch.GetTimestamp();
+                if (lastImageCheck != 0 && (now - lastImageCheck) / (double)Stopwatch.Frequency < 30) return;
+                lastImageCheck = now;
+                string segment;
+                lock (gate) { var completed = ReadCurrentSegments(); if (completed.Count == 0) return; segment = completed.Last().Name; }
+                var pixels = await ClipProcess.Read("ffmpeg.exe", new[] { "-v", "error", "-nostdin", "-threads", "1", "-i", Path.Combine(session, segment), "-map", "0:v:0", "-an", "-sn", "-dn", "-frames:v", "1", "-vf", "scale=64:36,format=gray", "-threads", "1", "-f", "rawvideo", "pipe:1" }, 64 * 36, token);
+                if (ImageHasContent(pixels)) { lastBlackSegment = null; return; }
+                // Require two different completed segments; a dark scene transition is not a failed source.
+                if (lastBlackSegment == null || lastBlackSegment == segment) { lastBlackSegment = segment; return; }
+                if (alternateImageProbe == null && captureMonitor == IntPtr.Zero) return;
+                var alternative = await ReadAlternateImageAsync(token);
+                if (ImageHasContent(alternative))
+                {
+                    lock (gate) { captureFault = "Capture returned black frames while the alternate source has an image."; resetBlackBuffer = true; }
+                }
+            }
+            catch (IOException error) { Log("Capture image check: " + error.Message); }
+            finally { saver.Release(); }
+        }
 
         public static string Quote(string value)
         {
@@ -300,9 +349,7 @@ namespace ReplayLite
                 foreach (var a in audio) a.Start();
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-filter_threads", "1", "-filter_complex_threads", "1", "-init_hw_device", "d3d11va=capture:" + Config.DisplayAdapter, "-filter_hw_device", "capture" };
                 foreach (var a in audio) args.AddRange(new[] { "-thread_queue_size", "32", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", a.InputPath });
-                string graph = graphicsCapture
-                    ? "gfxcapture=hmonitor=" + captureMonitor.ToInt64().ToString(CultureInfo.InvariantCulture) + ":max_framerate=" + Config.Fps + ":capture_cursor=" + (Config.CaptureCursor ? "1" : "0") + ":display_border=0" + Config.ScaleFilter + "[v]"
-                    : "ddagrab=output_idx=" + Config.Display + ":framerate=" + Config.Fps + ":draw_mouse=" + (Config.CaptureCursor ? "1" : "0") + Config.ScaleFilter + "[v]";
+                string graph = CaptureSource(graphicsCapture) + Config.ScaleFilter + "[v]";
                 if (audio.Count == 2) graph += ";[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:latency=1[a]";
                 args.AddRange(new[] { "-filter_complex", graph, "-map", "[v]", "-c:v", Config.Codec + "_nvenc", "-preset", "p1", "-tune", "ll", "-rc", Config.RateControl, "-b:v", Config.Mbps + "M", "-maxrate", Config.Mbps + "M", "-bufsize", (Config.Mbps * 2) + "M", "-g", (Config.Fps * 2).ToString(), "-force_key_frames", "expr:gte(t,n_forced*2)", "-bf", "0", "-rc-lookahead", "0", "-surfaces", "4", "-enc_time_base:v", "1:" + Config.Fps.ToString(CultureInfo.InvariantCulture), "-fps_mode", "vfr" });
                 if (audio.Count == 2) args.AddRange(new[] { "-map", "[a]" });
@@ -505,7 +552,8 @@ namespace ReplayLite
                 }
                 if (switchSource) graphicsCapture = !graphicsCapture;
                 await StartPipelineAsync(token);
-                if (retainedSegments.Count > 0)
+                if (resetBlackBuffer) { DiscardRetainedSegments(); resetBlackBuffer = false; }
+                else if (retainedSegments.Count > 0)
                 {
                     string currentFormat = null;
                     try { string first; lock (gate) first = ReadCurrentSegments()[0].Name; currentFormat = await ProbeVideoFormatAsync(Path.Combine(session, first), token); }
@@ -513,7 +561,7 @@ namespace ReplayLite
                     catch (Exception) { }
                     if (currentFormat != retainedVideoFormat || retainedRotation != OutputRotation) DiscardRetainedSegments();
                 }
-                retainedVideoFormat = null; Failure = null; recovering = false;
+                retainedVideoFormat = null; Failure = null; lastBlackSegment = null; lastImageCheck = 0; recovering = false;
             }
             finally { saver.Release(); }
         }
@@ -628,6 +676,8 @@ namespace ReplayLite
             if (args.Length == 2 && args[0] == "--buffer-test") return SelfTest.BufferResetTest(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--audio-test") return AudioRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
             if (args.Length == 2 && args[0] == "--capture-recovery-test") return CaptureRecoveryTests.Run(args[1]).GetAwaiter().GetResult();
+            if (args.Length == 2 && args[0] == "--capture-image-test") return CaptureRecoveryTests.ImageTest(args[1]).GetAwaiter().GetResult();
+            if (args.Length == 2 && args[0] == "--capture-image-live-test") return SelfTest.ImageLiveTest(args[1]);
             if (args.Length == 2 && args[0] == "--job-test") { SelfTest.JobExitTest(args[1]); return 0; }
             if (args.Length == 2 && args[0] == "--library-test")
             {

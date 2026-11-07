@@ -5,11 +5,61 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Drawing;
+using System.Windows.Forms;
 
 namespace ReplayLite
 {
     static class SelfTest
     {
+        internal static int ImageLiveTest(string root)
+        {
+            Directory.CreateDirectory(root); var report = new StringBuilder(); int result = 1;
+            var monitor = MonitorCatalog.Enumerate().First(m => m.Primary && m.CanCapture && m.Rotation == 0);
+            var screen = Screen.AllScreens.First(s => s.DeviceName == monitor.DeviceName);
+            using (var pattern = new Form { StartPosition = FormStartPosition.Manual, Bounds = new Rectangle(screen.Bounds.X + 100, screen.Bounds.Y + 100, 640, 360), FormBorderStyle = FormBorderStyle.None, TopMost = true, ShowInTaskbar = false })
+            {
+                pattern.Paint += delegate(object sender, PaintEventArgs e) {
+                    e.Graphics.FillRectangle(Brushes.Red, 0, 0, 320, 180); e.Graphics.FillRectangle(Brushes.Lime, 320, 0, 320, 180);
+                    e.Graphics.FillRectangle(Brushes.Blue, 0, 180, 320, 180); e.Graphics.FillRectangle(Brushes.Yellow, 320, 180, 320, 180);
+                };
+                pattern.Shown += async delegate {
+                    try
+                    {
+                        await Task.Delay(400);
+                        foreach (bool graphics in new[] { false, true }) foreach (string resolution in new[] { "native", "720" })
+                        {
+                            var settings = new Settings { Seconds = 10, Fps = 30, Mbps = 8, Audio = "none", Folder = root, BufferFolder = Path.Combine(root, "buffer"), Display = monitor.Output, DisplayAdapter = monitor.Adapter, MonitorId = monitor.Id, Resolution = resolution };
+                            using (var recorder = new Recorder(settings))
+                            {
+                                typeof(Recorder).GetField("graphicsCapture", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(recorder, graphics);
+                                await recorder.StartAsync(); string clip = await recorder.SaveAsync(); await CaptureRecoveryTests.Decode(clip);
+                                byte[] image = await ClipProcess.Read("ffmpeg.exe", new[] { "-v", "error", "-i", clip, "-an", "-frames:v", "1", "-vf", "scale=" + screen.Bounds.Width + ":" + screen.Bounds.Height, "-threads", "1", "-f", "image2pipe", "-c:v", "png", "pipe:1" }, 16 * 1024 * 1024, System.Threading.CancellationToken.None);
+                                using (var stream = new MemoryStream(image)) using (var bitmap = new Bitmap(stream))
+                                {
+                                    Color[] expected = { Color.Red, Color.Lime, Color.Blue, Color.Yellow }; int[] x = { 260, 580, 260, 580 }, y = { 190, 190, 370, 370 };
+                                    for (int i = 0; i < expected.Length; i++)
+                                    {
+                                        Color actual = bitmap.GetPixel(x[i], y[i]);
+                                        if (Math.Abs(actual.R - expected[i].R) > 55 || Math.Abs(actual.G - expected[i].G) > 55 || Math.Abs(actual.B - expected[i].B) > 55) throw new Exception("Captured pattern color mismatch: " + actual + " vs " + expected[i]);
+                                    }
+                                }
+                                await recorder.CheckImageHealthAsync(System.Threading.CancellationToken.None);
+                                if (recorder.NeedsRecovery) throw new Exception("Visible pattern incorrectly flagged as black");
+                                if (!Recorder.ImageHasContent(await recorder.ReadAlternateImageAsync(System.Threading.CancellationToken.None))) throw new Exception("Real alternate source health probe returned black");
+                                await recorder.StopAsync();
+                                report.AppendLine((graphics ? "WGC" : "DDA") + "_" + resolution + "_NVENC_FOUR_COLORS_EXPORT_DECODE: PASS");
+                            }
+                        }
+                        result = 0;
+                    }
+                    catch (Exception error) { report.AppendLine("FAIL: " + error); }
+                    finally { File.WriteAllText(Path.Combine(root, "capture-image-live-test.txt"), report.ToString(), new UTF8Encoding(false)); pattern.Close(); }
+                };
+                Application.Run(pattern);
+            }
+            return result;
+        }
         public static void JobExitTest(string marker)
         {
             var ffmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "ffmpeg.exe");
@@ -45,6 +95,7 @@ namespace ReplayLite
                     for (int i = 0; i < settings.Seconds + 4; i++)
                     {
                         await Task.Delay(1000); app.Refresh();
+                        await recorder.CheckImageHealthAsync(System.Threading.CancellationToken.None);
                         if (recorder.Failure != null || !recorder.Running) throw new Exception(recorder.Failure ?? recorder.ErrorLog);
                         peakMemory = Math.Max(peakMemory, app.WorkingSet64 + recorder.Memory); peakDisk = Math.Max(peakDisk, recorder.DiskBytes);
                     }

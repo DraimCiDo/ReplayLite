@@ -354,6 +354,7 @@ namespace ReplayLite
             if (Native.SessionEnding) return;
             if (recorder == null || busy || saving || closing) return;
             if (recoveryPending || !recorder.Running) return;
+            if (recorder.NeedsRecovery) { ScheduleRecovery(); return; }
             if (recorder.BufferedSeconds <= 0) { UpdateSaveAvailability(0); SetState(L.T("Накапливаем первые кадры…"), TrayState.Recording); return; }
             saving = true; SetState(L.T("Сохраняю повтор…"), TrayState.Saving);
             try { var output = await recorder.SaveAsync(); lastReplay = output; RefreshBufferMetrics(); progress.FinishAnimation(); SetState(L.T("Сохранено: ") + Path.GetFileName(output)); if (!testing) { if (settings.SaveNotification) { lastBalloonWasUpdate = false; tray.ShowBalloonTip(3000, L.T("Повтор сохранён"), output, ToolTipIcon.Info); } if (settings.SaveSound) { var feedback = SaveFeedback.PlayAsync(settings.FeedbackTone, settings.FeedbackVolume); } } }
@@ -379,6 +380,9 @@ namespace ReplayLite
                 ShowError(message); return;
             }
             // Health monitoring stays active in the tray; hidden UI skips metrics and all painting.
+            try { await recorder.CheckImageHealthAsync(updateCancel.Token); }
+            catch (OperationCanceledException) { return; }
+            if (recorder == null || closing || released) return;
             if (!Visible || WindowState == FormWindowState.Minimized || windowMoving) return;
             try
             {
@@ -414,7 +418,7 @@ namespace ReplayLite
                     lastCpu = Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds + recorder.CpuSeconds; lastTime = clock.Elapsed.TotalSeconds;
                     SetState(L.T("Запись восстановлена"), TrayState.Recording); RefreshBufferMetrics();
                     if (recorder.UsingGraphicsCapture) stateDetail.Text = L.T("Используется резервный захват Windows Graphics Capture.\nКадры кодируются на видеокарте.");
-                    if (recorder.BufferResetOnRecovery) stateDetail.Text = L.T("Формат экрана изменился — буфер начат заново.\nНовые кадры уже записываются.");
+                    if (recorder.BufferResetOnRecovery) stateDetail.Text = L.T("Видеобуфер начат заново после восстановления захвата.\nНовые кадры уже записываются.");
                 }
             }
             catch (OperationCanceledException) { }
@@ -448,7 +452,7 @@ namespace ReplayLite
         void PowerChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
         { if (e.Mode == Microsoft.Win32.PowerModes.Resume && !IsDisposed && IsHandleCreated) BeginInvoke(new Action(delegate { if (recorder != null) ScheduleRecovery(); })); }
         void SessionChanged(object sender, Microsoft.Win32.SessionSwitchEventArgs e)
-        { if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock && IsHandleCreated && !released) BeginInvoke(new Action(delegate { if (recoveryPending) nextRecovery = DateTime.UtcNow; })); }
+        { if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock && IsHandleCreated && !released) BeginInvoke(new Action(delegate { ScheduleRecovery(); if (recoveryPending) nextRecovery = DateTime.UtcNow; })); }
         void ShowError(string message) { if (closing || released || Native.SessionEnding) return; if (testing) throw new InvalidOperationException(message); Restore(); MessageBox.Show(this, message, "ReplayLite", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         void EndWindowsSession()
         {
@@ -589,8 +593,14 @@ namespace ReplayLite
                 if (policy.nextRecovery < DateTime.UtcNow.AddSeconds(1) || policy.recoveryFailures != 1) throw new Exception("Short-lived capture success reset failure backoff.");
                 policy.recoveryPending = false; policy.recoveryHealthySince = DateTime.UtcNow.AddSeconds(-31); policy.ScheduleRecovery();
                 if (policy.recoveryFailures != 0 || policy.nextRecovery > DateTime.UtcNow.AddSeconds(1)) throw new Exception("Stable capture did not reset backoff.");
+                policy.recoveryPending = false;
+                var policyHandle = policy.Handle;
+                policy.SessionChanged(null, new Microsoft.Win32.SessionSwitchEventArgs(Microsoft.Win32.SessionSwitchReason.SessionUnlock));
+                await Task.Delay(50);
+                if (!policy.recoveryPending || policy.nextRecovery > DateTime.UtcNow) throw new Exception("Unlock did not restart a live capture session.");
             }
             report.AppendLine("FLAPPING_AND_DISPLAY_EVENT_STORMS_KEEP_BOUNDED_BACKOFF: PASS");
+            report.AppendLine("SESSION_UNLOCK_RESTARTS_CAPTURE_WITHOUT_PROCESS_EXIT: PASS");
             using (var shutdown = new MainForm(true, true))
             {
                 try

@@ -50,6 +50,8 @@ jobs:
         run: ./source/check-audio.ps1
       - name: Check desktop capture recovery without GPU
         run: ./source/check-capture-recovery.ps1
+      - name: Check black capture detection and visible export without GPU
+        run: ./source/check-capture-image.ps1
       - name: Validate configured signing
         if: env.SIGNING_ENABLED == 'true'
         env:
